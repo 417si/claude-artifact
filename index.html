@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>今日のおみくじ</title>
+<style>
+  :root{--bg:#fff7ec;--fg:#3a2a1a;--accent:#d9480f;--card:#fff}
+  @media (prefers-color-scheme:dark){:root{--bg:#1c1511;--fg:#f5e9da;--accent:#ff8c4b;--card:#2a201a}}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif}
+  main{text-align:center;padding:16px;max-width:420px;width:100%}
+  .card{background:var(--card);border-radius:16px;padding:32px 24px;box-shadow:0 4px 20px #0002}
+  #result{font-size:3rem;font-weight:700;color:var(--accent);min-height:1.2em}
+  #msg{min-height:3em}
+  button{font-size:1.1rem;padding:12px 28px;border:0;border-radius:999px;background:var(--accent);color:#fff;cursor:pointer}
+  button:active{transform:scale(.97)}
+  .shake{animation:s .4s}
+  @keyframes s{25%{transform:rotate(-6deg)}75%{transform:rotate(6deg)}}
+</style>
+</head>
+<body>
+<main>
+  <h1>🎋 今日のおみくじ</h1>
+  <div class="card" id="card">
+    <div id="result">？</div>
+    <p id="msg">ボタンを押して運勢を占おう</p>
+    <button id="draw">引く</button>
+  </div>
+</main>
+<script>
+const fortunes=[
+  ["大吉","最高の一日になりそう。新しいことに挑戦しよう！"],
+  ["中吉","いい流れ。落ち着いて進めば大丈夫。"],
+  ["小吉","小さな幸せが見つかる日。"],
+  ["吉","普通が一番。のんびり過ごそう。"],
+  ["末吉","後半に運が向いてくる。焦らずに。"],
+  ["凶","今日は慎重に。コーヒーでも飲んで一息。"]
+];
+const $=id=>document.getElementById(id);
+$("draw").onclick=()=>{
+  const [r,m]=fortunes[Math.floor(Math.random()*fortunes.length)];
+  const c=$("card");c.classList.remove("shake");void c.offsetWidth;c.classList.add("shake");
+  $("result").textContent=r;$("msg").textContent=m;$("draw").textContent="もう一回";
+};
+</script>
+</body>
+</html>
