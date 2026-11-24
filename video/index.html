@@ -1,0 +1,732 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ムービーラボ</title>
+<meta name="description" content="スマホで撮った動画をブラウザの中で学習して、似た雰囲気の動画を生成する実験室。">
+<meta name="theme-color" content="#121316">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎥</text></svg>">
+<style>
+:root{
+  --bg:#f5f4f0;--panel:#fff;--fg:#1c1b19;--muted:#6e6a63;--line:#e2dfd7;
+  --accent:#d2452f;--accent-fg:#fff;--soft:#f0ebe3;--ok:#2f8a5f;--radius:16px;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#121316;--panel:#1c1d21;--fg:#eceae4;--muted:#99958d;--line:#2e2f34;
+    --accent:#ff6a4d;--accent-fg:#1a0d09;--soft:#25262b;--ok:#5cc490}
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--fg);font:15px/1.6 system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;
+  padding-bottom:calc(68px + env(safe-area-inset-bottom))}
+button,select,input{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:9px 14px;touch-action:manipulation}
+button:disabled{opacity:.45;cursor:default}
+button.primary{background:var(--accent);color:var(--accent-fg);border-color:transparent;font-weight:700}
+header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;padding:10px 16px;
+  padding-top:calc(10px + env(safe-area-inset-top));background:color-mix(in srgb,var(--bg) 88%,transparent);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+header h1{margin:0;font-size:17px}
+header .sp{flex:1}
+#storage{font-size:12px;color:var(--muted)}
+main{max-width:640px;margin:0 auto;padding:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:14px}
+.card h2{margin:0 0 6px;font-size:16px}
+.muted{color:var(--muted);font-size:13px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.grow{flex:1}
+
+/* tabs */
+nav{position:fixed;left:0;right:0;bottom:0;z-index:6;display:grid;grid-template-columns:repeat(4,1fr);
+  background:var(--panel);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{border:0;border-radius:0;background:none;padding:8px 0 10px;font-size:11px;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:2px}
+nav button b{font-size:20px;line-height:1.2;font-weight:400}
+nav button[aria-selected="true"]{color:var(--accent)}
+
+/* capture */
+.stage{position:relative;aspect-ratio:1;border-radius:var(--radius);overflow:hidden;background:#000;margin-bottom:12px}
+.stage video{width:100%;height:100%;object-fit:cover;display:block}
+.stage video.mirror{transform:scaleX(-1)}
+.stage .over{position:absolute;inset:0;display:grid;place-items:center;color:#fff;text-align:center;padding:20px;font-size:14px;background:#0008}
+.stage .rec{position:absolute;top:12px;left:12px;background:#000a;color:#fff;border-radius:99px;padding:3px 10px;font-size:13px;font-variant-numeric:tabular-nums}
+.stage .rec::before{content:"●";color:#ff4b3a;margin-right:6px;animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.2}}
+.shutter{width:72px;height:72px;border-radius:50%;border:4px solid var(--fg);background:transparent;padding:0;display:grid;place-items:center;margin:0 auto}
+.shutter i{display:block;width:54px;height:54px;border-radius:50%;background:var(--accent);transition:all .2s}
+.shutter.on i{width:28px;height:28px;border-radius:6px}
+.capbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px}
+.capbar .r{justify-self:end}
+label.file{display:inline-block;border:1px solid var(--line);border-radius:12px;padding:9px 14px;background:var(--panel);cursor:pointer}
+label.file input{display:none}
+
+/* library */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+.clip{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.clip img{width:100%;aspect-ratio:1;object-fit:cover;display:block;background:#000;cursor:pointer}
+.clip .info{padding:6px 8px;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.clip .info span{flex:1}
+.clip .info button{padding:2px 8px;font-size:12px;border-radius:8px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}
+.stats div{background:var(--soft);border-radius:12px;padding:8px}
+.stats b{display:block;font-size:20px}
+.stats span{font-size:11px;color:var(--muted)}
+
+/* train */
+.bar{height:8px;background:var(--line);border-radius:99px;overflow:hidden;margin:10px 0 4px}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+#lossChart{width:100%;height:90px;display:block;background:var(--soft);border-radius:10px}
+.recon{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}
+.recon canvas{width:100%;aspect-ratio:1;border-radius:8px;image-rendering:auto;background:#000}
+.recon .lab{grid-column:1/-1;font-size:11px;color:var(--muted)}
+select{border:1px solid var(--line);border-radius:10px;padding:7px 10px;background:var(--panel)}
+
+/* generate */
+#genCanvas{width:100%;aspect-ratio:1;border-radius:var(--radius);background:#000;display:block}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.field{margin:10px 0}
+.field label{display:flex;justify-content:space-between;font-size:13px;color:var(--muted)}
+
+dialog{border:0;border-radius:var(--radius);padding:0;background:#000;max-width:min(92vw,560px)}
+dialog video{display:block;width:100%;max-height:80vh}
+dialog::backdrop{background:#000c}
+.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--fg);color:var(--bg);
+  padding:8px 14px;border-radius:99px;font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:9;max-width:90vw}
+.toast.show{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <h1>🎥 ムービーラボ</h1>
+  <div class="sp"></div>
+  <div id="storage"></div>
+</header>
+
+<main>
+  <!-- 撮影 -->
+  <section id="tab-capture">
+    <div class="stage">
+      <video id="cam" playsinline muted autoplay></video>
+      <div class="over" id="camOver">カメラを起動して、短い動画を撮ってください。<br>撮るほど学習データが増えます。</div>
+      <div class="rec" id="recBadge" hidden>0.0s</div>
+    </div>
+    <div class="capbar">
+      <div><button id="btnCam">📷 カメラ起動</button></div>
+      <button class="shutter" id="btnRec" disabled aria-label="録画"><i></i></button>
+      <div class="r"><button id="btnFlip" disabled>🔄 切替</button></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div class="row">
+        <div class="grow muted">最大10秒まで録画。カメラ以外に、撮影済みの動画ファイルも追加できます。</div>
+        <label class="file">📁 ファイル追加<input type="file" id="fileIn" accept="video/*" multiple></label>
+      </div>
+    </div>
+  </section>
+
+  <!-- ライブラリ -->
+  <section id="tab-library" hidden>
+    <div class="card">
+      <div class="stats">
+        <div><b id="stClips">0</b><span>クリップ</span></div>
+        <div><b id="stFrames">0</b><span>学習フレーム</span></div>
+        <div><b id="stSec">0</b><span>秒</span></div>
+      </div>
+    </div>
+    <div class="grid" id="grid"></div>
+    <p class="muted" id="libEmpty">まだ動画がありません。「撮影」タブから撮ってみましょう。</p>
+  </section>
+
+  <!-- 学習 -->
+  <section id="tab-train" hidden>
+    <div class="card">
+      <h2>🧠 ブラウザ内で学習</h2>
+      <p class="muted" style="margin:0 0 10px">撮った動画のフレーム（64×64px）から、①映像の特徴を圧縮して描き直すモデル と ②動き方を予測するモデル をこの端末のGPUで学習します。データも学習結果も外部には送信されません。学習中は画面を開いたままにしてください。</p>
+      <div class="row">
+        <select id="epochs">
+          <option value="5">さっと（5周）</option>
+          <option value="15" selected>ふつう（15周）</option>
+          <option value="40">じっくり（40周）</option>
+        </select>
+        <button class="primary grow" id="btnTrain">学習スタート</button>
+      </div>
+      <div class="bar"><i id="trainBar"></i></div>
+      <div class="muted" id="trainStatus">準備中…</div>
+    </div>
+    <div class="card">
+      <div class="row"><b class="grow">誤差の推移</b><span class="muted" id="lossNow"></span></div>
+      <canvas id="lossChart" width="600" height="90"></canvas>
+      <div class="recon" id="recon"></div>
+    </div>
+    <div class="card">
+      <div class="row">
+        <div class="grow muted" id="modelInfo">モデル未作成</div>
+        <button id="btnResetModel">リセット</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 生成 -->
+  <section id="tab-generate" hidden>
+    <canvas id="genCanvas" width="480" height="480"></canvas>
+    <div class="card" style="margin-top:12px">
+      <div class="field">
+        <label>モード</label>
+        <select id="genMode" style="width:100%">
+          <option value="dream">🌙 夢モード — 学習した「動き」で続きを想像する</option>
+          <option value="morph">🌊 モーフ — 撮った場面どうしをなめらかにつなぐ</option>
+        </select>
+      </div>
+      <div class="field">
+        <label><span>長さ</span><span id="lenVal">6秒</span></label>
+        <input type="range" id="genLen" min="2" max="15" value="6">
+      </div>
+      <div class="field">
+        <label><span>ゆらぎ（ランダムさ）</span><span id="noiseVal">0.30</span></label>
+        <input type="range" id="genNoise" min="0" max="100" value="30">
+      </div>
+      <div class="row">
+        <button class="primary grow" id="btnGen">✨ 生成する</button>
+        <button id="btnSave" disabled>💾 動画に書き出し</button>
+      </div>
+      <div class="row" id="saveRow" hidden style="margin-top:10px">
+        <a id="dlLink" class="grow"><button style="width:100%">⬇︎ ダウンロード</button></a>
+        <button id="btnShare" hidden>📤 共有 / 写真に保存</button>
+      </div>
+      <p class="muted" id="genStatus" style="margin:10px 0 0">学習が済むと生成できます。</p>
+    </div>
+  </section>
+</main>
+
+<nav>
+  <button data-tab="capture" aria-selected="true"><b>●</b>撮影</button>
+  <button data-tab="library"><b>▦</b>ライブラリ</button>
+  <button data-tab="train"><b>◎</b>学習</button>
+  <button data-tab="generate"><b>✦</b>生成</button>
+</nav>
+
+<dialog id="player"><video id="playerVideo" controls playsinline></video></dialog>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<script>
+"use strict";
+const S = 64;          // 学習解像度
+const FPS = 8;         // 学習用サンプリングfps
+const LAT = 32;        // 潜在次元
+const MAX_SEC = 10;    // 1クリップの最大秒数
+const MAX_TRAIN_FRAMES = 3000;
+const PLAY_FPS = 24;   // 再生時の補間fps
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+// 画面が隠れていると requestAnimationFrame が止まるので、そのときは setTimeout で譲る
+const yieldUI = () => document.hidden ? sleep(0) : new Promise(r => requestAnimationFrame(() => r()));
+
+function toast(msg, ms = 2200) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), ms);
+}
+
+/* ================= IndexedDB ================= */
+const db = {
+  _p: null,
+  open() {
+    return this._p ||= new Promise((res, rej) => {
+      const r = indexedDB.open("movielab", 1);
+      r.onupgradeneeded = () => { r.result.createObjectStore("clips", { keyPath: "id" }); r.result.createObjectStore("meta"); };
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    });
+  },
+  async tx(store, mode, fn) {
+    const d = await this.open();
+    return new Promise((res, rej) => {
+      const t = d.transaction(store, mode), s = t.objectStore(store);
+      const req = fn(s);
+      t.oncomplete = () => res(req?.result); t.onerror = () => rej(t.error);
+    });
+  },
+  put: (store, v, k) => db.tx(store, "readwrite", s => s.put(v, k)),
+  get: (store, k) => db.tx(store, "readonly", s => s.get(k)),
+  del: (store, k) => db.tx(store, "readwrite", s => s.delete(k)),
+  all: (store) => db.tx(store, "readonly", s => s.getAll()),
+};
+
+async function updateStorage() {
+  try {
+    const clips = await db.all("clips");
+    const bytes = clips.reduce((a, c) => a + c.frames.byteLength + (c.video ? c.video.byteLength : 0), 0);
+    $("storage").textContent = `動画データ ${(bytes / 1048576).toFixed(1)}MB`;
+  } catch {}
+}
+
+/* ================= フレーム取得 ================= */
+const grabCanvas = document.createElement("canvas"); grabCanvas.width = grabCanvas.height = S;
+const grabCtx = grabCanvas.getContext("2d", { willReadFrequently: true });
+function grabFrame(src, w, h) {
+  const m = Math.min(w, h);
+  grabCtx.drawImage(src, (w - m) / 2, (h - m) / 2, m, m, 0, 0, S, S);
+  const px = grabCtx.getImageData(0, 0, S, S).data, out = new Uint8Array(S * S * 3);
+  for (let i = 0, j = 0; i < px.length; i += 4, j += 3) { out[j] = px[i]; out[j + 1] = px[i + 1]; out[j + 2] = px[i + 2]; }
+  return out;
+}
+function thumbOf(src, w, h) {
+  const c = document.createElement("canvas"); c.width = c.height = 240;
+  const m = Math.min(w, h);
+  c.getContext("2d").drawImage(src, (w - m) / 2, (h - m) / 2, m, m, 0, 0, 240, 240);
+  return c.toDataURL("image/jpeg", 0.75);
+}
+function concatFrames(list) {
+  const out = new Uint8Array(list.length * S * S * 3);
+  list.forEach((f, i) => out.set(f, i * S * S * 3));
+  return out;
+}
+
+async function saveClip({ blob, mime, frames, thumb, sec, source }) {
+  if (frames.length < 4) { toast("短すぎるので保存しませんでした"); return; }
+  const clip = { id: Date.now() + "-" + Math.random().toString(36).slice(2, 6), created: Date.now(), mime, sec,
+    n: frames.length, frames: concatFrames(frames), thumb, source, video: blob ? await blob.arrayBuffer() : null };
+  await db.put("clips", clip);
+  navigator.storage?.persist?.().catch(() => {});
+  await refreshLibrary(); updateStorage();
+  toast(`保存しました（${frames.length}フレーム）`);
+}
+
+/* ================= 撮影 ================= */
+const cam = { stream: null, facing: "environment", rec: null, chunks: [], frames: [], timer: null, t0: 0, thumb: null };
+const pickMime = () => ["video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9", "video/webm"]
+  .find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || "";
+
+async function startCamera() {
+  try {
+    cam.stream?.getTracks().forEach(t => t.stop());
+    cam.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: cam.facing, width: { ideal: 720 }, height: { ideal: 720 } }, audio: false });
+    const v = $("cam"); v.srcObject = cam.stream; await v.play().catch(() => {});
+    v.classList.toggle("mirror", cam.facing === "user");
+    $("camOver").hidden = true; $("btnRec").disabled = false; $("btnFlip").disabled = false;
+    $("btnCam").textContent = "⏹ 停止";
+  } catch (e) {
+    $("camOver").hidden = false;
+    $("camOver").textContent = "カメラを使えませんでした: " + (e.message || e) + "\nブラウザのカメラ許可を確認してください。ファイル追加でも学習できます。";
+  }
+}
+function stopCamera() {
+  if (cam.rec) stopRec();
+  cam.stream?.getTracks().forEach(t => t.stop()); cam.stream = null;
+  $("cam").srcObject = null; $("camOver").hidden = false; $("btnRec").disabled = true; $("btnFlip").disabled = true;
+  $("btnCam").textContent = "📷 カメラ起動";
+}
+function startRec() {
+  const v = $("cam"), mime = pickMime();
+  cam.chunks = []; cam.frames = []; cam.thumb = null;
+  try {
+    cam.rec = window.MediaRecorder ? new MediaRecorder(cam.stream, mime ? { mimeType: mime } : undefined) : null;
+  } catch { cam.rec = null; }
+  if (cam.rec) { cam.rec.ondataavailable = e => e.data.size && cam.chunks.push(e.data); cam.rec.start(250); }
+  else cam.rec = { fake: true };
+  cam.t0 = performance.now();
+  $("btnRec").classList.add("on"); $("recBadge").hidden = false; $("btnFlip").disabled = true;
+  cam.timer = setInterval(() => {
+    if (!v.videoWidth) return;
+    cam.frames.push(grabFrame(v, v.videoWidth, v.videoHeight));
+    if (!cam.thumb) cam.thumb = thumbOf(v, v.videoWidth, v.videoHeight);
+    const sec = (performance.now() - cam.t0) / 1000;
+    $("recBadge").textContent = sec.toFixed(1) + "s";
+    if (sec >= MAX_SEC) stopRec();
+  }, 1000 / FPS);
+}
+async function stopRec() {
+  clearInterval(cam.timer);
+  const r = cam.rec; cam.rec = null;
+  $("btnRec").classList.remove("on"); $("recBadge").hidden = true; $("btnFlip").disabled = false;
+  const sec = (performance.now() - cam.t0) / 1000;
+  let blob = null, mime = "";
+  if (r && !r.fake) {
+    await new Promise(res => { r.onstop = res; r.stop(); });
+    mime = r.mimeType || "video/webm"; blob = new Blob(cam.chunks, { type: mime });
+  }
+  await saveClip({ blob, mime, frames: cam.frames, thumb: cam.thumb, sec, source: "camera" });
+}
+
+/* ファイルから取り込み */
+const once = (el, ev, ms = 8000) => new Promise((res, rej) => {
+  const t = setTimeout(() => { el.removeEventListener(ev, h); rej(new Error(ev + " timeout")); }, ms);
+  const h = () => { clearTimeout(t); res(); }; el.addEventListener(ev, h, { once: true });
+});
+async function importFile(file) {
+  const url = URL.createObjectURL(file);
+  const v = document.createElement("video");
+  v.muted = true; v.playsInline = true; v.preload = "auto"; v.src = url;
+  try {
+    await once(v, "loadedmetadata");
+    if (!isFinite(v.duration)) { v.currentTime = 1e7; await once(v, "durationchange").catch(() => {}); }
+    await v.play().catch(() => {}); v.pause();
+    const dur = Math.min(isFinite(v.duration) ? v.duration : MAX_SEC, MAX_SEC);
+    const n = Math.floor(dur * FPS), frames = []; let thumb = null;
+    for (let i = 0; i < n; i++) {
+      v.currentTime = (i + 0.5) / FPS;
+      await once(v, "seeked", 5000);
+      frames.push(grabFrame(v, v.videoWidth, v.videoHeight));
+      if (!thumb) thumb = thumbOf(v, v.videoWidth, v.videoHeight);
+      if (i % 8 === 0) toast(`読み込み中… ${Math.round(i / n * 100)}%`);
+    }
+    await saveClip({ blob: file.size < 60e6 ? file : null, mime: file.type, frames, thumb, sec: dur, source: "file" });
+  } catch (e) { toast("この動画は読み込めませんでした: " + e.message, 4000); }
+  finally { URL.revokeObjectURL(url); }
+}
+
+/* ================= ライブラリ ================= */
+let clipCache = [];
+async function refreshLibrary() {
+  clipCache = (await db.all("clips")).sort((a, b) => b.created - a.created);
+  const grid = $("grid"); grid.innerHTML = "";
+  let frames = 0, sec = 0;
+  for (const c of clipCache) {
+    frames += c.n; sec += c.sec || c.n / FPS;
+    const el = document.createElement("div"); el.className = "clip";
+    const d = new Date(c.created);
+    el.innerHTML = `<img alt="" src="${c.thumb || ""}"><div class="info"><span>${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")} ・ ${(c.sec || 0).toFixed(1)}s</span><button title="削除">🗑</button></div>`;
+    el.querySelector("img").onclick = () => playClip(c);
+    el.querySelector("button").onclick = async () => {
+      if (!confirm("このクリップを削除しますか？")) return;
+      await db.del("clips", c.id); refreshLibrary(); updateStorage();
+    };
+    grid.append(el);
+  }
+  $("stClips").textContent = clipCache.length; $("stFrames").textContent = frames; $("stSec").textContent = Math.round(sec);
+  $("libEmpty").hidden = clipCache.length > 0;
+  updateTrainButton();
+}
+function playClip(c) {
+  if (!c.video) { toast("元の動画は保存されていません（学習用フレームのみ）"); return; }
+  const v = $("playerVideo");
+  if (v.src) URL.revokeObjectURL(v.src);
+  v.src = URL.createObjectURL(new Blob([c.video], { type: c.mime || "video/mp4" }));
+  $("player").showModal(); v.play().catch(() => {});
+}
+$("player").addEventListener("click", (e) => { if (e.target === $("player")) { $("playerVideo").pause(); $("player").close(); } });
+
+/* ================= モデル ================= */
+const M = { enc: null, dec: null, ae: null, dyn: null, stats: null, training: false, stop: false, losses: [] };
+const ENC_URL = "indexeddb://movielab-enc", DEC_URL = "indexeddb://movielab-dec", DYN_URL = "indexeddb://movielab-dyn";
+
+function buildEncoder() {
+  const m = tf.sequential({ name: "encoder" });
+  m.add(tf.layers.conv2d({ inputShape: [S, S, 3], filters: 24, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }));
+  m.add(tf.layers.conv2d({ filters: 48, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }));
+  m.add(tf.layers.conv2d({ filters: 64, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }));
+  m.add(tf.layers.conv2d({ filters: 96, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }));
+  m.add(tf.layers.flatten());
+  m.add(tf.layers.dense({ units: LAT }));
+  return m;
+}
+function buildDecoder() {
+  const m = tf.sequential({ name: "decoder" });
+  m.add(tf.layers.dense({ inputShape: [LAT], units: 4 * 4 * 96, activation: "relu" }));
+  m.add(tf.layers.reshape({ targetShape: [4, 4, 96] }));
+  for (const f of [64, 48, 24, 16]) {
+    m.add(tf.layers.upSampling2d({ size: [2, 2], interpolation: "bilinear" }));
+    m.add(tf.layers.conv2d({ filters: f, kernelSize: 3, padding: "same", activation: "relu" }));
+  }
+  m.add(tf.layers.conv2d({ filters: 3, kernelSize: 3, padding: "same", activation: "sigmoid" }));
+  return m;
+}
+function buildDynamics() {
+  const m = tf.sequential({ name: "dynamics" });
+  m.add(tf.layers.dense({ inputShape: [LAT * 2], units: 128, activation: "relu" }));
+  m.add(tf.layers.dense({ units: 128, activation: "relu" }));
+  m.add(tf.layers.dense({ units: LAT }));
+  m.compile({ optimizer: tf.train.adam(1e-3), loss: "meanSquaredError" });
+  return m;
+}
+function wireAE() {
+  const inp = tf.input({ shape: [S, S, 3] });
+  M.ae = tf.model({ inputs: inp, outputs: M.dec.apply(M.enc.apply(inp)) });
+  M.ae.compile({ optimizer: tf.train.adam(1e-3), loss: "meanSquaredError" });
+}
+async function loadModels() {
+  try {
+    const list = await tf.io.listModels();
+    if (!list[ENC_URL] || !list[DEC_URL]) return false;
+    M.enc = await tf.loadLayersModel(ENC_URL); M.dec = await tf.loadLayersModel(DEC_URL);
+    M.dyn = list[DYN_URL] ? await tf.loadLayersModel(DYN_URL) : null;
+    if (M.dyn) M.dyn.compile({ optimizer: tf.train.adam(1e-3), loss: "meanSquaredError" });
+    M.stats = await db.get("meta", "stats");
+    wireAE();
+    return true;
+  } catch (e) { console.warn("model load failed", e); return false; }
+}
+function updateModelInfo() {
+  const s = M.stats;
+  $("modelInfo").textContent = s
+    ? `学習済み：通算${s.epochs}周 ・ ${s.frames}フレーム ・ ${new Date(s.trainedAt).toLocaleString("ja-JP")}`
+    : "モデル未作成（学習するとここに表示されます）";
+  $("genStatus").textContent = s ? "準備OK。「生成する」を押してください。" : "学習が済むと生成できます。";
+  $("btnGen").disabled = !s;
+}
+function updateTrainButton() {
+  if (M.training) return;
+  const frames = clipCache.reduce((a, c) => a + c.n, 0);
+  $("btnTrain").disabled = frames < 16;
+  $("trainStatus").textContent = frames < 16 ? "学習するには動画をもう少し撮ってください（最低2秒ほど）。" : `${clipCache.length}本・${frames}フレームで学習できます。${frames < 200 ? "（たくさん撮るほど良くなります）" : ""}`;
+}
+
+function gatherFrames() {
+  // 全クリップのフレームを集める（多すぎる場合は間引く）
+  const total = clipCache.reduce((a, c) => a + c.n, 0);
+  const keep = (k) => total <= MAX_TRAIN_FRAMES || Math.floor((k + 1) * MAX_TRAIN_FRAMES / total) > Math.floor(k * MAX_TRAIN_FRAMES / total);
+  const refs = [];
+  let k = 0;
+  for (const c of clipCache) for (let i = 0; i < c.n; i++, k++) if (keep(k)) refs.push([c, i]);
+  return refs;
+}
+function batchTensor(refs) {
+  const n = refs.length, buf = new Float32Array(n * S * S * 3), F = S * S * 3;
+  refs.forEach(([c, i], b) => { const src = c.frames.subarray(i * F, (i + 1) * F); for (let j = 0; j < F; j++) buf[b * F + j] = src[j] / 255; });
+  return tf.tensor4d(buf, [n, S, S, 3]);
+}
+function drawLoss() {
+  const c = $("lossChart"), g = c.getContext("2d"), L = M.losses;
+  g.clearRect(0, 0, c.width, c.height);
+  if (L.length < 2) return;
+  const lg = L.map(v => Math.log(v)), mx = Math.max(...lg), mn = Math.min(...lg);
+  g.strokeStyle = getComputedStyle(document.body).getPropertyValue("--accent"); g.lineWidth = 2.5; g.beginPath();
+  lg.forEach((v, i) => { const x = i / (L.length - 1) * (c.width - 8) + 4, y = 6 + (1 - (v - mn) / (mx - mn || 1)) * (c.height - 12); i ? g.lineTo(x, y) : g.moveTo(x, y); });
+  g.stroke();
+}
+async function drawRecon(sampleRefs) {
+  const box = $("recon"); box.innerHTML = '<div class="lab">上：元のフレーム ／ 下：モデルが描き直したもの</div>';
+  const x = batchTensor(sampleRefs), y = M.ae.predict(x);
+  const [xa, ya] = [await x.data(), await y.data()]; x.dispose(); y.dispose();
+  for (const arr of [xa, ya]) for (let b = 0; b < sampleRefs.length; b++) {
+    const cv = document.createElement("canvas"); cv.width = cv.height = S;
+    putFloatFrame(cv.getContext("2d"), arr, b); box.append(cv);
+  }
+}
+function putFloatFrame(ctx, arr, b) {
+  const img = ctx.createImageData(S, S), F = S * S * 3;
+  for (let i = 0, j = b * F; i < S * S; i++, j += 3) { img.data[i * 4] = arr[j] * 255; img.data[i * 4 + 1] = arr[j + 1] * 255; img.data[i * 4 + 2] = arr[j + 2] * 255; img.data[i * 4 + 3] = 255; }
+  ctx.putImageData(img, 0, 0);
+}
+
+async function encodeAll() {
+  // 各クリップを潜在ベクトル列に変換
+  const seqs = [];
+  for (const c of clipCache) {
+    const refs = Array.from({ length: c.n }, (_, i) => [c, i]), z = new Float32Array(c.n * LAT);
+    for (let i = 0; i < c.n; i += 64) {
+      const x = batchTensor(refs.slice(i, i + 64)), out = M.enc.predict(x);
+      z.set(await out.data(), i * LAT); x.dispose(); out.dispose();
+    }
+    seqs.push(z);
+  }
+  return seqs;
+}
+
+async function train() {
+  if (M.training) { M.stop = true; $("btnTrain").textContent = "止めています…"; return; }
+  M.training = true; M.stop = false;
+  $("btnTrain").textContent = "⏸ 停止"; $("btnGen").disabled = true;
+  const status = (t) => $("trainStatus").textContent = t, bar = (p) => $("trainBar").style.width = (p * 100) + "%";
+  try {
+    await tf.ready();
+    if (!M.enc) { M.enc = buildEncoder(); M.dec = buildDecoder(); wireAE(); }
+    const refs = gatherFrames(), epochs = +$("epochs").value, BS = 32;
+    const sample = Array.from({ length: 4 }, (_, i) => refs[Math.floor((i + 0.5) / 4 * refs.length)]);
+    const steps = Math.ceil(refs.length / BS) * epochs;
+    let step = 0, done = 0;
+    status(`① 映像モデルを学習中…（${refs.length}フレーム, ${tf.getBackend()}）`);
+    for (let ep = 0; ep < epochs && !M.stop; ep++) {
+      const order = refs.slice().sort(() => Math.random() - 0.5);
+      let sum = 0, cnt = 0;
+      for (let i = 0; i < order.length && !M.stop; i += BS) {
+        const x = batchTensor(order.slice(i, i + BS));
+        const loss = await M.ae.trainOnBatch(x, x);
+        x.dispose();
+        sum += Array.isArray(loss) ? loss[0] : loss; cnt++;
+        bar(++step / steps * 0.85);
+        if (cnt % 4 === 0) await yieldUI();
+      }
+      if (!cnt) break;
+      done++;
+      M.losses.push(sum / cnt); drawLoss();
+      $("lossNow").textContent = `誤差 ${(sum / cnt).toFixed(4)}`;
+      status(`① 映像モデルを学習中… ${ep + 1}/${epochs}周`);
+      await drawRecon(sample);
+    }
+    if (!done) throw new Error("停止しました");
+
+    status("② 動きのモデルを学習中…");
+    const seqs = await encodeAll();
+    // 潜在空間の平均・分散
+    const mean = new Float32Array(LAT), std = new Float32Array(LAT); let N = 0;
+    for (const z of seqs) for (let t = 0; t < z.length / LAT; t++, N++) for (let d = 0; d < LAT; d++) mean[d] += z[t * LAT + d];
+    mean.forEach((v, d) => mean[d] = v / N);
+    for (const z of seqs) for (let t = 0; t < z.length / LAT; t++) for (let d = 0; d < LAT; d++) std[d] += (z[t * LAT + d] - mean[d]) ** 2;
+    std.forEach((v, d) => std[d] = Math.sqrt(v / N) + 1e-4);
+    const X = [], Y = [];
+    for (const z of seqs) {
+      const n = z.length / LAT, nz = (t, d) => (z[t * LAT + d] - mean[d]) / std[d];
+      for (let t = 1; t < n - 1; t++) {
+        const row = new Array(LAT * 2), tgt = new Array(LAT);
+        for (let d = 0; d < LAT; d++) { row[d] = nz(t, d); row[LAT + d] = nz(t, d) - nz(t - 1, d); tgt[d] = nz(t + 1, d) - nz(t, d); }
+        X.push(row); Y.push(tgt);
+      }
+    }
+    if (!M.dyn) M.dyn = buildDynamics();
+    if (X.length >= 8) {
+      const xt = tf.tensor2d(X), yt = tf.tensor2d(Y), dynEpochs = Math.max(10, epochs * 2);
+      await M.dyn.fit(xt, yt, { epochs: dynEpochs, batchSize: 64, shuffle: true, verbose: 0, yieldEvery: "never",
+        callbacks: { onEpochEnd: async (e, l) => { bar(0.85 + (e + 1) / dynEpochs * 0.13); status(`② 動きのモデルを学習中… ${e + 1}/${dynEpochs}（誤差 ${l.loss.toFixed(3)}）`); if (M.stop) M.dyn.stopTraining = true; await yieldUI(); } } });
+      xt.dispose(); yt.dispose();
+    }
+
+    status("保存中…");
+    await M.enc.save(ENC_URL); await M.dec.save(DEC_URL); await M.dyn.save(DYN_URL);
+    // 生成で使う「実在の場面」用に各クリップの潜在列も保存
+    M.stats = { mean: Array.from(mean), std: Array.from(std), epochs: (M.stats?.epochs || 0) + done, frames: refs.length, trainedAt: Date.now(),
+      seqs: seqs.map(z => Array.from(z, (v, i) => +((v - mean[i % LAT]) / std[i % LAT]).toFixed(3))) };
+    await db.put("meta", M.stats, "stats");
+    bar(1); status(M.stop ? "途中で止めました（ここまでの結果を保存）" : "✅ 学習完了！「生成」タブで動画を作れます。");
+    toast("学習が完了しました");
+  } catch (e) {
+    console.error(e); status("エラー: " + (e.message || e));
+  } finally {
+    M.training = false; $("btnTrain").textContent = "学習スタート（続きから）";
+    updateModelInfo(); updateStorage();
+  }
+}
+
+/* ================= 生成 ================= */
+const G = { frames: null, raf: 0, t0: 0, recording: false, url: null };
+function randn() { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+const clamp = (v, a) => Math.max(-a, Math.min(a, v));
+
+async function generate() {
+  if (!M.stats || !M.dec) return;
+  $("btnGen").disabled = true; $("btnSave").disabled = true; $("saveRow").hidden = true;
+  $("genStatus").textContent = "生成中…";
+  await yieldUI();
+  const n = Math.round(+$("genLen").value * FPS), noise = +$("genNoise").value / 100;
+  const seqs = M.stats.seqs.filter(s => s.length >= LAT * 3);
+  if (!seqs.length) { $("genStatus").textContent = "学習データが足りません"; $("btnGen").disabled = false; return; }
+  const pickFrame = () => { const s = seqs[Math.floor(Math.random() * seqs.length)], t = 1 + Math.floor(Math.random() * (s.length / LAT - 2)); return [s, t]; };
+  const Z = []; // 正規化済み潜在列
+  if ($("genMode").value === "dream" && M.dyn) {
+    const [s, t] = pickFrame();
+    let prev = s.slice((t - 1) * LAT, t * LAT), cur = s.slice(t * LAT, (t + 1) * LAT);
+    for (let k = 0; k < n; k++) {
+      Z.push(cur);
+      const inp = tf.tensor2d([[...cur, ...cur.map((v, d) => v - prev[d])]]);
+      const out = M.dyn.predict(inp), delta = await out.data(); inp.dispose(); out.dispose();
+      const next = cur.map((v, d) => clamp(v + delta[d] + noise * 0.35 * randn(), 2.8));
+      // ときどき実在の場面へゆるく引き寄せて、破綻しにくくする
+      if (k % (FPS * 3) === FPS * 3 - 1 && Math.random() < 0.5 + noise / 2) {
+        const [s2, t2] = pickFrame(), tgt = s2.slice(t2 * LAT, (t2 + 1) * LAT);
+        for (let d = 0; d < LAT; d++) next[d] = next[d] * 0.6 + tgt[d] * 0.4;
+      }
+      prev = cur; cur = next;
+    }
+  } else {
+    const keys = Math.max(2, Math.ceil(n / (FPS * 1.5)) + 1), K = [];
+    for (let i = 0; i < keys; i++) { const [s, t] = pickFrame(); K.push(s.slice(t * LAT, (t + 1) * LAT)); }
+    for (let k = 0; k < n; k++) {
+      const p = k / (n - 1) * (keys - 1), i = Math.min(keys - 2, Math.floor(p)), f = p - i, e = f * f * (3 - 2 * f);
+      Z.push(K[i].map((v, d) => v * (1 - e) + K[i + 1][d] * e + noise * 0.15 * randn()));
+    }
+  }
+  // 復号
+  const { mean, std } = M.stats;
+  const zt = tf.tensor2d(Z.map(z => z.map((v, d) => v * std[d] + mean[d])));
+  const imgs = M.dec.predict(zt), data = await imgs.data(); zt.dispose(); imgs.dispose();
+  G.frames = Array.from({ length: n }, (_, b) => {
+    const c = document.createElement("canvas"); c.width = c.height = S; putFloatFrame(c.getContext("2d"), data, b); return c;
+  });
+  $("genStatus").textContent = `${n}フレーム（${(n / FPS).toFixed(1)}秒）を生成しました。ループ再生中。`;
+  $("btnGen").disabled = false; $("btnSave").disabled = false;
+  play();
+}
+function drawAt(timeSec) {
+  const c = $("genCanvas"), g = c.getContext("2d"), F = G.frames, p = (timeSec * FPS) % F.length;
+  const i = Math.floor(p), f = p - i;
+  g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "high";
+  g.globalAlpha = 1; g.drawImage(F[i], 0, 0, c.width, c.height);
+  g.globalAlpha = f; g.drawImage(F[(i + 1) % F.length], 0, 0, c.width, c.height);
+  g.globalAlpha = 1;
+}
+function play() {
+  cancelAnimationFrame(G.raf); G.t0 = performance.now();
+  const loop = (now) => { if (G.frames) drawAt((now - G.t0) / 1000); G.raf = requestAnimationFrame(loop); };
+  G.raf = requestAnimationFrame(loop);
+}
+async function exportVideo() {
+  const c = $("genCanvas");
+  if (!c.captureStream || !window.MediaRecorder) { toast("このブラウザは動画の書き出しに対応していません", 3500); return; }
+  const mime = pickMime();
+  $("btnSave").disabled = true; $("btnGen").disabled = true; $("genStatus").textContent = "書き出し中…（1周再生します）";
+  const stream = c.captureStream(PLAY_FPS), rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 4e6 } : undefined), chunks = [];
+  rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+  play(); rec.start(200);
+  await sleep(G.frames.length / FPS * 1000 + 150);
+  await new Promise(r => { rec.onstop = r; rec.stop(); });
+  stream.getTracks().forEach(t => t.stop());
+  const type = rec.mimeType || "video/webm", ext = type.includes("mp4") ? "mp4" : "webm";
+  const blob = new Blob(chunks, { type }), name = `movielab-${Date.now()}.${ext}`;
+  if (G.url) URL.revokeObjectURL(G.url);
+  G.url = URL.createObjectURL(blob);
+  $("dlLink").href = G.url; $("dlLink").download = name;
+  const file = new File([blob], name, { type });
+  $("btnShare").hidden = !(navigator.canShare && navigator.canShare({ files: [file] }));
+  $("btnShare").onclick = () => navigator.share({ files: [file], title: "ムービーラボ" }).catch(() => {});
+  $("saveRow").hidden = false; $("btnSave").disabled = false; $("btnGen").disabled = false;
+  $("genStatus").textContent = `書き出し完了（${(blob.size / 1024).toFixed(0)}KB, ${ext}）`;
+}
+
+/* ================= UI配線 ================= */
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.setAttribute("aria-selected", x === b));
+  for (const t of ["capture", "library", "train", "generate"]) $("tab-" + t).hidden = t !== b.dataset.tab;
+  if (b.dataset.tab !== "capture" && cam.stream && !cam.rec) stopCamera();
+  scrollTo(0, 0);
+});
+$("btnCam").onclick = () => cam.stream ? stopCamera() : startCamera();
+$("btnFlip").onclick = () => { cam.facing = cam.facing === "user" ? "environment" : "user"; startCamera(); };
+$("btnRec").onclick = () => cam.rec ? stopRec() : startRec();
+$("fileIn").onchange = async (e) => { for (const f of e.target.files) await importFile(f); e.target.value = ""; };
+$("btnTrain").onclick = train;
+$("btnResetModel").onclick = async () => {
+  if (!confirm("学習したモデルを消去して、最初からやり直しますか？（動画は消えません）")) return;
+  for (const u of [ENC_URL, DEC_URL, DYN_URL]) await tf.io.removeModel(u).catch(() => {});
+  await db.del("meta", "stats");
+  Object.assign(M, { enc: null, dec: null, ae: null, dyn: null, stats: null, losses: [] });
+  drawLoss(); $("recon").innerHTML = ""; $("lossNow").textContent = ""; $("btnTrain").textContent = "学習スタート";
+  updateModelInfo(); updateStorage(); toast("モデルをリセットしました");
+};
+$("btnGen").onclick = generate;
+$("btnSave").onclick = exportVideo;
+$("genLen").oninput = () => $("lenVal").textContent = $("genLen").value + "秒";
+$("genNoise").oninput = () => $("noiseVal").textContent = (+$("genNoise").value / 100).toFixed(2);
+
+window.__lab = { db, M, saveClip, importFile, refreshLibrary, train, generate, grabFrame, concatFrames }; // デバッグ用
+
+(async () => {
+  if (!window.tf) { document.querySelector("main").insertAdjacentHTML("afterbegin", '<div class="card">TensorFlow.jsの読み込みに失敗しました。通信環境を確認してください。</div>'); return; }
+  await refreshLibrary(); updateStorage();
+  if (await loadModels()) $("btnTrain").textContent = "学習スタート（続きから）";
+  updateModelInfo();
+  await tf.ready();
+  const backend = tf.getBackend();
+  console.log("tf backend:", backend);
+  if (backend === "webgl") {
+    // GPUがリセットされると学習が止まるので、利用者に知らせる
+    tf.backend().gpgpu?.gl?.canvas?.addEventListener("webglcontextlost", () => {
+      M.stop = true;
+      $("trainStatus").textContent = "⚠️ GPUがリセットされました。ページを再読み込みしてから、もう一度学習してください（撮った動画は残っています）。";
+      toast("GPUがリセットされました。再読み込みしてください", 5000);
+    });
+  } else {
+    $("trainStatus").insertAdjacentHTML("beforebegin", '<p class="muted" style="color:var(--accent)">⚠️ この端末ではGPU（WebGL）が使えないため、学習がとても遅くなります。</p>');
+  }
+})();
+</script>
+</body>
+</html>
