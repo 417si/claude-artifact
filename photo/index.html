@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>フォトラボ</title>
+<meta name="description" content="自分の写真をたくさん選んで、ブラウザの中で学習し、新しい画像を生成する実験室。">
+<meta name="theme-color" content="#121316">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🖼️</text></svg>">
+<style>
+:root{
+  --bg:#f5f4f0;--panel:#fff;--fg:#1c1b19;--muted:#6e6a63;--line:#e2dfd7;
+  --accent:#3f5fd6;--accent-fg:#fff;--soft:#eeedf3;--radius:16px;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#121316;--panel:#1c1d21;--fg:#eceae4;--muted:#99958d;--line:#2e2f34;
+    --accent:#8aa2ff;--accent-fg:#0c1230;--soft:#25262d}
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;min-height:100%}
+body{background:var(--bg);color:var(--fg);font:15px/1.6 system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;
+  padding-bottom:calc(68px + env(safe-area-inset-bottom))}
+button,select,input{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:9px 14px;touch-action:manipulation}
+button:disabled{opacity:.45;cursor:default}
+button.primary{background:var(--accent);color:var(--accent-fg);border-color:transparent;font-weight:700}
+header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;padding:10px 16px;
+  padding-top:calc(10px + env(safe-area-inset-top));background:color-mix(in srgb,var(--bg) 88%,transparent);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+header h1{margin:0;font-size:17px}
+header .sp{flex:1}
+#storage{font-size:12px;color:var(--muted)}
+main{max-width:680px;margin:0 auto;padding:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:14px}
+.card h2{margin:0 0 6px;font-size:16px}
+.muted{color:var(--muted);font-size:13px}
+.warn{color:var(--accent);font-size:13px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.grow{flex:1}
+select{border:1px solid var(--line);border-radius:10px;padding:7px 10px;background:var(--panel)}
+
+nav{position:fixed;left:0;right:0;bottom:0;z-index:6;display:grid;grid-template-columns:repeat(3,1fr);
+  background:var(--panel);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{border:0;border-radius:0;background:none;padding:8px 0 10px;font-size:11px;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:2px}
+nav button b{font-size:20px;line-height:1.2;font-weight:400}
+nav button[aria-selected="true"]{color:var(--accent)}
+
+.pick{display:block;text-align:center;border:2px dashed var(--line);border-radius:var(--radius);padding:26px 16px;cursor:pointer;background:var(--panel)}
+.pick:hover{border-color:var(--accent)}
+.pick input{display:none}
+.pick b{display:block;font-size:17px;margin:4px 0}
+.bar{height:8px;background:var(--line);border-radius:99px;overflow:hidden;margin:10px 0 4px}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;text-align:center}
+.stats div{background:var(--soft);border-radius:12px;padding:8px}
+.stats b{display:block;font-size:20px}
+.stats span{font-size:11px;color:var(--muted)}
+.thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:4px}
+.thumbs canvas{width:100%;aspect-ratio:1;border-radius:6px;display:block;cursor:pointer;background:#000}
+
+#lossChart{width:100%;height:80px;display:block;background:var(--soft);border-radius:10px}
+.preview{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}
+.preview canvas{width:100%;aspect-ratio:1;border-radius:8px;background:#000}
+.preview .lab{grid-column:1/-1;font-size:11px;color:var(--muted);margin-top:4px}
+
+.modes{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.modes button{display:flex;flex-direction:column;align-items:center;gap:2px;padding:10px 4px;font-size:12px}
+.modes button b{font-size:22px;font-weight:400}
+.modes button[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 20%,transparent)}
+#genGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+#genGrid canvas{width:100%;aspect-ratio:1;border-radius:10px;cursor:pointer;background:#000;display:block}
+#genGrid .src{outline:3px solid var(--accent);outline-offset:-3px}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.field{margin:10px 0}
+.field label{display:flex;justify-content:space-between;font-size:13px;color:var(--muted)}
+
+dialog{border:0;border-radius:var(--radius);padding:14px;background:var(--panel);color:var(--fg);width:min(92vw,440px)}
+dialog::backdrop{background:#000b}
+dialog canvas{width:100%;aspect-ratio:1;border-radius:12px;display:block;background:#000}
+dialog .row{margin-top:10px}
+.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--fg);color:var(--bg);
+  padding:8px 14px;border-radius:99px;font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:9;max-width:90vw}
+.toast.show{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <h1>🖼️ フォトラボ</h1>
+  <div class="sp"></div>
+  <div id="storage"></div>
+</header>
+
+<main>
+  <!-- 写真 -->
+  <section id="tab-photos">
+    <label class="pick">
+      <input type="file" id="fileIn" accept="image/*" multiple>
+      <div style="font-size:34px">📷</div>
+      <b>写真を選ぶ（まとめて選択OK）</b>
+      <span class="muted">似た雰囲気の写真（空、料理、ペット、風景…）を50〜数百枚選ぶと、それっぽい画像が出やすくなります。</span>
+    </label>
+    <div class="card" id="importCard" hidden style="margin-top:12px">
+      <div class="row"><b class="grow" id="importText">取り込み中…</b></div>
+      <div class="bar"><i id="importBar"></i></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div class="stats">
+        <div><b id="stCount">0</b><span>学習用の写真</span></div>
+        <div><b id="stSize">0MB</b><span>端末内の保存量</span></div>
+      </div>
+      <p class="muted" style="margin:10px 0 0">写真は96×96pxに縮小したものだけを、この端末のブラウザ内に保存します。元の写真や学習データが外部に送られることはありません。</p>
+    </div>
+    <div class="thumbs" id="thumbs"></div>
+    <div class="row" style="margin-top:12px">
+      <span class="muted grow" id="thumbMore"></span>
+      <button id="btnClearPhotos" hidden>🗑 写真をすべて削除</button>
+    </div>
+  </section>
+
+  <!-- 学習 -->
+  <section id="tab-train" hidden>
+    <div class="card">
+      <h2>🧠 ブラウザ内で学習</h2>
+      <p class="muted" style="margin:0 0 10px">写真の特徴を「数値の地図」に整理しながら描き直すモデル（VAE）を、この端末のGPUで学習します。地図の上のどこを選んでも画像を描けるようになるので、新しい画像を作れます。学習中は画面を開いたままにしてください。</p>
+      <p class="warn" id="noGpu" hidden>⚠️ この端末ではGPU（WebGL）が使えないため、学習がとても遅くなります。</p>
+      <div class="row" style="margin-bottom:8px">
+        <span class="muted">画質</span>
+        <select id="res">
+          <option value="64" selected>64px（速い・おすすめ）</option>
+          <option value="96">96px（細かい・2倍以上遅い）</option>
+        </select>
+        <select id="epochs">
+          <option value="5">さっと（5周）</option>
+          <option value="20" selected>ふつう（20周）</option>
+          <option value="60">じっくり（60周）</option>
+        </select>
+      </div>
+      <button class="primary" id="btnTrain" style="width:100%">学習スタート</button>
+      <div class="bar"><i id="trainBar"></i></div>
+      <div class="muted" id="trainStatus">準備中…</div>
+    </div>
+    <div class="card">
+      <div class="row"><b class="grow">学習の進み具合</b><span class="muted" id="lossNow"></span></div>
+      <canvas id="lossChart" width="600" height="80"></canvas>
+      <div class="preview" id="preview"></div>
+    </div>
+    <div class="card">
+      <div class="row">
+        <div class="grow muted" id="modelInfo">モデル未作成</div>
+        <button id="btnResetModel">リセット</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 生成 -->
+  <section id="tab-generate" hidden>
+    <div class="modes" id="modes">
+      <button data-mode="random" aria-pressed="true"><b>🎲</b>おまかせ</button>
+      <button data-mode="similar" aria-pressed="false"><b>🪞</b>似た画像</button>
+      <button data-mode="mix" aria-pressed="false"><b>🔀</b>まぜる</button>
+    </div>
+    <div id="genGrid"></div>
+    <div class="card" style="margin-top:12px">
+      <p class="muted" id="modeHelp" style="margin:0 0 6px"></p>
+      <div class="field">
+        <label><span>冒険度（大きいほど奇抜に）</span><span id="tempVal">0.8</span></label>
+        <input type="range" id="temp" min="10" max="200" value="80">
+      </div>
+      <button class="primary" id="btnGen" style="width:100%">✨ 生成する</button>
+      <p class="muted" id="genStatus" style="margin:10px 0 0">学習が済むと生成できます。画像をタップすると大きく表示・保存できます。</p>
+    </div>
+  </section>
+</main>
+
+<nav>
+  <button data-tab="photos" aria-selected="true"><b>▦</b>写真</button>
+  <button data-tab="train" aria-selected="false"><b>◎</b>学習</button>
+  <button data-tab="generate" aria-selected="false"><b>✦</b>生成</button>
+</nav>
+
+<dialog id="viewer">
+  <canvas id="viewCanvas" width="512" height="512"></canvas>
+  <div class="row">
+    <button class="grow" id="vSimilar">🪞 これに似た画像</button>
+    <button class="grow" id="vSave">⬇︎ 保存</button>
+    <button id="vShare" hidden>📤</button>
+    <button id="vDelete" hidden>🗑</button>
+    <button id="vClose">閉じる</button>
+  </div>
+</dialog>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<script>
+"use strict";
+const R = 96;            // 保存解像度
+const LAT = 64;          // 潜在次元
+const MAX_PHOTOS = 2000; // 学習に使う上限
+const MAX_THUMBS = 300;  // 一覧に出す上限
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const yieldUI = () => document.hidden ? sleep(0) : new Promise(r => requestAnimationFrame(() => r()));
+function toast(msg, ms = 2200) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), ms);
+}
+
+/* ================= IndexedDB ================= */
+const db = {
+  _p: null,
+  open() {
+    return this._p ||= new Promise((res, rej) => {
+      const r = indexedDB.open("photolab", 1);
+      r.onupgradeneeded = () => { r.result.createObjectStore("photos", { keyPath: "id" }); r.result.createObjectStore("meta"); };
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    });
+  },
+  async tx(store, mode, fn) {
+    const d = await this.open();
+    return new Promise((res, rej) => {
+      const t = d.transaction(store, mode), s = t.objectStore(store);
+      const req = fn(s);
+      t.oncomplete = () => res(req?.result); t.onerror = () => rej(t.error);
+    });
+  },
+  putMany: (store, arr) => db.tx(store, "readwrite", s => { arr.forEach(v => s.put(v)); }),
+  put: (store, v, k) => db.tx(store, "readwrite", s => s.put(v, k)),
+  get: (store, k) => db.tx(store, "readonly", s => s.get(k)),
+  del: (store, k) => db.tx(store, "readwrite", s => s.delete(k)),
+  clear: (store) => db.tx(store, "readwrite", s => s.clear()),
+  all: (store) => db.tx(store, "readonly", s => s.getAll()),
+};
+
+/* ================= 写真の取り込み ================= */
+const cropCanvas = document.createElement("canvas"); cropCanvas.width = cropCanvas.height = R;
+const cropCtx = cropCanvas.getContext("2d", { willReadFrequently: true });
+async function decodeImage(file) {
+  if (window.createImageBitmap) {
+    try { return await createImageBitmap(file, { imageOrientation: "from-image" }); } catch {}
+  }
+  const url = URL.createObjectURL(file), img = new Image();
+  img.src = url;
+  try { await img.decode(); return img; } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
+}
+function toPixels(src) {
+  const w = src.width || src.naturalWidth, h = src.height || src.naturalHeight, m = Math.min(w, h);
+  cropCtx.imageSmoothingQuality = "high";
+  cropCtx.drawImage(src, (w - m) / 2, (h - m) / 2, m, m, 0, 0, R, R);
+  const d = cropCtx.getImageData(0, 0, R, R).data, px = new Uint8Array(R * R * 3);
+  for (let i = 0, j = 0; i < d.length; i += 4, j += 3) { px[j] = d[i]; px[j + 1] = d[i + 1]; px[j + 2] = d[i + 2]; }
+  return px;
+}
+async function importPhotos(files) {
+  files = [...files].filter(f => !f.type || f.type.startsWith("image/"));
+  if (!files.length) return;
+  $("importCard").hidden = false;
+  let ok = 0, ng = 0, buf = [];
+  const flush = async () => { if (buf.length) { await db.putMany("photos", buf); buf = []; } };
+  for (let i = 0; i < files.length; i++) {
+    try {
+      const img = await decodeImage(files[i]);
+      buf.push({ id: Date.now().toString(36) + "-" + i + "-" + Math.random().toString(36).slice(2, 6), created: Date.now(), px: toPixels(img) });
+      img.close?.(); ok++;
+    } catch (e) { console.warn("skip", files[i].name, e); ng++; }
+    if (buf.length >= 25) await flush();
+    $("importText").textContent = `取り込み中… ${i + 1} / ${files.length}`;
+    $("importBar").style.width = ((i + 1) / files.length * 100) + "%";
+    if (i % 5 === 0) await yieldUI();
+  }
+  await flush();
+  navigator.storage?.persist?.().catch(() => {});
+  $("importText").textContent = `✅ ${ok}枚を取り込みました` + (ng ? `（${ng}枚は読み込めませんでした）` : "");
+  setTimeout(() => $("importCard").hidden = true, 4000);
+  await refreshPhotos();
+}
+
+/* ================= 一覧 ================= */
+let photos = [];
+function pxToCanvas(px, res = R) {
+  const c = document.createElement("canvas"); c.width = c.height = res;
+  const ctx = c.getContext("2d"), img = ctx.createImageData(res, res);
+  for (let i = 0, j = 0; j < px.length; i += 4, j += 3) { img.data[i] = px[j]; img.data[i + 1] = px[j + 1]; img.data[i + 2] = px[j + 2]; img.data[i + 3] = 255; }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+async function refreshPhotos() {
+  photos = (await db.all("photos")).sort((a, b) => b.created - a.created);
+  $("stCount").textContent = photos.length;
+  $("stSize").textContent = (photos.length * R * R * 3 / 1048576).toFixed(1) + "MB";
+  $("storage").textContent = `写真 ${photos.length}枚`;
+  const box = $("thumbs"); box.innerHTML = "";
+  photos.slice(0, MAX_THUMBS).forEach(p => {
+    const c = pxToCanvas(p.px); c.onclick = () => openViewer(c, { photo: p }); box.append(c);
+  });
+  $("thumbMore").textContent = photos.length > MAX_THUMBS ? `ほか ${photos.length - MAX_THUMBS} 枚` : "";
+  $("btnClearPhotos").hidden = !photos.length;
+  updateTrainUI();
+}
+
+/* ================= モデル（VAE） ================= */
+const M = { enc: null, dec: null, opt: null, meta: null, training: false, stop: false, losses: [] };
+const ENC_URL = "indexeddb://photolab-enc", DEC_URL = "indexeddb://photolab-dec";
+const curRes = () => M.meta?.res || +$("res").value;
+
+function buildEncoder(S) {
+  const m = tf.sequential({ name: "encoder" });
+  m.add(tf.layers.conv2d({ inputShape: [S, S, 3], filters: 32, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }));
+  m.add(tf.layers.conv2d({ filters: 64, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }));
+  m.add(tf.layers.conv2d({ filters: 96, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }));
+  m.add(tf.layers.conv2d({ filters: 128, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }));
+  m.add(tf.layers.flatten());
+  m.add(tf.layers.dense({ units: LAT * 2 })); // [平均, log分散]
+  return m;
+}
+function buildDecoder(S) {
+  const b = S / 16, m = tf.sequential({ name: "decoder" });
+  m.add(tf.layers.dense({ inputShape: [LAT], units: b * b * 128, activation: "relu" }));
+  m.add(tf.layers.reshape({ targetShape: [b, b, 128] }));
+  for (const f of [96, 64, 32, 16]) {
+    m.add(tf.layers.upSampling2d({ size: [2, 2], interpolation: "bilinear" }));
+    m.add(tf.layers.conv2d({ filters: f, kernelSize: 3, padding: "same", activation: "relu" }));
+  }
+  m.add(tf.layers.conv2d({ filters: 3, kernelSize: 3, padding: "same", activation: "sigmoid" }));
+  return m;
+}
+function splitStats(h) {
+  const mu = h.slice([0, 0], [-1, LAT]);
+  const lv = h.slice([0, LAT], [-1, LAT]).clipByValue(-8, 6);
+  return [mu, lv];
+}
+function vaeLoss(x, beta) {
+  const [mu, lv] = splitStats(M.enc.apply(x));
+  const z = mu.add(tf.exp(lv.mul(0.5)).mul(tf.randomNormal(mu.shape)));
+  const y = M.dec.apply(z);
+  const rec = tf.mean(tf.sum(tf.square(y.sub(x)), [1, 2, 3]));
+  const kl = tf.mean(tf.sum(tf.exp(lv).add(mu.square()).sub(1).sub(lv), 1)).mul(0.5);
+  return rec.add(kl.mul(beta));
+}
+function batchTensor(list, augment, S) {
+  return tf.tidy(() => {
+    const F = R * R * 3, buf = new Float32Array(list.length * F);
+    list.forEach((p, b) => { const px = p.px; for (let j = 0; j < F; j++) buf[b * F + j] = px[j] / 255; });
+    let t = tf.tensor4d(buf, [list.length, R, R, 3]);
+    if (S !== R) t = tf.image.resizeBilinear(t, [S, S], true);
+    if (augment && Math.random() < 0.5) t = tf.image.flipLeftRight(t);
+    return t;
+  });
+}
+async function loadModels() {
+  try {
+    const list = await tf.io.listModels();
+    if (!list[ENC_URL] || !list[DEC_URL]) return false;
+    M.meta = await db.get("meta", "model");
+    if (!M.meta) return false;
+    M.enc = await tf.loadLayersModel(ENC_URL); M.dec = await tf.loadLayersModel(DEC_URL);
+    return true;
+  } catch (e) { console.warn("load failed", e); return false; }
+}
+function updateModelInfo() {
+  const m = M.meta;
+  $("modelInfo").textContent = m ? `学習済み：${m.res}px ・ 通算${m.epochs}周 ・ 写真${m.count}枚 ・ ${new Date(m.trainedAt).toLocaleString("ja-JP")}` : "モデル未作成（学習するとここに表示されます）";
+  $("res").disabled = !!m; if (m) $("res").value = String(m.res);
+  $("btnGen").disabled = !m || M.training;
+  if (!M.training) $("genStatus").textContent = m ? "準備OK。「生成する」を押してください。画像をタップすると大きく表示・保存できます。" : "学習が済むと生成できます。";
+  $("btnTrain").textContent = M.training ? "⏸ 停止" : m ? "学習スタート（続きから）" : "学習スタート";
+}
+function updateTrainUI() {
+  if (M.training) return;
+  const n = photos.length;
+  $("btnTrain").disabled = n < 8;
+  $("trainStatus").textContent = n < 8 ? "写真を8枚以上取り込むと学習できます（50枚以上がおすすめ）。" : `${Math.min(n, MAX_PHOTOS)}枚で学習できます。${n < 50 ? "（枚数が多いほど良くなります）" : ""}`;
+}
+function drawLoss() {
+  const c = $("lossChart"), g = c.getContext("2d"), L = M.losses;
+  g.clearRect(0, 0, c.width, c.height);
+  if (L.length < 2) return;
+  const lg = L.map(v => Math.log(v)), mx = Math.max(...lg), mn = Math.min(...lg);
+  g.strokeStyle = getComputedStyle(document.body).getPropertyValue("--accent").trim(); g.lineWidth = 2.5; g.beginPath();
+  lg.forEach((v, i) => { const x = i / (L.length - 1) * (c.width - 8) + 4, y = 6 + (1 - (v - mn) / (mx - mn || 1)) * (c.height - 12); i ? g.lineTo(x, y) : g.moveTo(x, y); });
+  g.stroke();
+}
+function tensorToCanvases(t) {
+  const [n, S] = t.shape, data = t.dataSync(), out = [];
+  for (let b = 0; b < n; b++) {
+    const c = document.createElement("canvas"); c.width = c.height = S;
+    const ctx = c.getContext("2d"), img = ctx.createImageData(S, S), off = b * S * S * 3;
+    for (let i = 0; i < S * S; i++) { img.data[i * 4] = data[off + i * 3] * 255; img.data[i * 4 + 1] = data[off + i * 3 + 1] * 255; img.data[i * 4 + 2] = data[off + i * 3 + 2] * 255; img.data[i * 4 + 3] = 255; }
+    ctx.putImageData(img, 0, 0); out.push(c);
+  }
+  return out;
+}
+function encodeMu(list, S) {
+  return tf.tidy(() => splitStats(M.enc.predict(batchTensor(list, false, S)))[0]);
+}
+function drawPreview(sample, S) {
+  const box = $("preview"); box.innerHTML = "";
+  const orig = tf.tidy(() => batchTensor(sample, false, S));
+  const rec = tf.tidy(() => M.dec.predict(encodeMu(sample, S)));
+  const rnd = tf.tidy(() => M.dec.predict(tf.randomNormal([4, LAT]).mul(0.8)));
+  box.insertAdjacentHTML("beforeend", '<div class="lab">元の写真</div>'); tensorToCanvases(orig).forEach(c => box.append(c));
+  box.insertAdjacentHTML("beforeend", '<div class="lab">モデルが描き直したもの</div>'); tensorToCanvases(rec).forEach(c => box.append(c));
+  box.insertAdjacentHTML("beforeend", '<div class="lab">まったく新しく生成したもの</div>'); tensorToCanvases(rnd).forEach(c => box.append(c));
+  orig.dispose(); rec.dispose(); rnd.dispose();
+}
+
+async function train() {
+  if (M.training) { M.stop = true; $("btnTrain").textContent = "止めています…"; return; }
+  M.training = true; M.stop = false; updateModelInfo();
+  const status = (t) => $("trainStatus").textContent = t, bar = (p) => $("trainBar").style.width = (p * 100) + "%";
+  let done = 0;
+  try {
+    await tf.ready();
+    const S = curRes();
+    if (!M.enc) { M.enc = buildEncoder(S); M.dec = buildDecoder(S); }
+    M.opt ||= tf.train.adam(5e-4);
+    const data = photos.length > MAX_PHOTOS ? photos.slice().sort(() => Math.random() - 0.5).slice(0, MAX_PHOTOS) : photos;
+    const sample = Array.from({ length: 4 }, (_, i) => data[Math.floor((i + 0.5) / 4 * data.length)]);
+    const epochs = +$("epochs").value, BS = 32, per = Math.ceil(data.length / BS), prev = M.meta?.epochs || 0;
+    let step = 0;
+    for (let ep = 0; ep < epochs && !M.stop; ep++) {
+      const order = data.slice().sort(() => Math.random() - 0.5);
+      const beta = Math.min(1, (prev + ep + 1) / 8); // 最初はKLを弱めて、徐々に強める
+      let sum = 0, cnt = 0;
+      for (let i = 0; i < order.length && !M.stop; i += BS) {
+        const x = batchTensor(order.slice(i, i + BS), true, S);
+        const cost = M.opt.minimize(() => vaeLoss(x, beta), true);
+        sum += (await cost.data())[0]; cost.dispose(); x.dispose(); cnt++;
+        bar(++step / (per * epochs));
+        if (cnt % 2 === 0) await yieldUI();
+      }
+      if (!cnt || M.stop && cnt < per) break;
+      done++;
+      const avg = sum / cnt / (S * S * 3);
+      M.losses.push(avg); drawLoss();
+      $("lossNow").textContent = `誤差 ${avg.toFixed(4)}`;
+      status(`学習中… ${ep + 1}/${epochs}周（${data.length}枚, ${S}px, ${tf.getBackend()}）`);
+      drawPreview(sample, S);
+      await yieldUI();
+    }
+    if (done) {
+      status("保存中…");
+      await M.enc.save(ENC_URL); await M.dec.save(DEC_URL);
+      M.meta = { res: S, epochs: prev + done, count: data.length, trainedAt: Date.now() };
+      await db.put("meta", M.meta, "model");
+      status(M.stop ? `途中で止めました（${done}周分を保存）` : "✅ 学習完了！「生成」タブで新しい画像を作れます。");
+      toast("学習結果を保存しました");
+    } else status("停止しました（保存なし）");
+    bar(1);
+  } catch (e) {
+    console.error(e); status("エラー: " + (e.message || e));
+  } finally {
+    M.training = false; updateModelInfo();
+  }
+}
+
+/* ================= 生成 ================= */
+let mode = "random", sourcePhoto = null;
+const HELP = {
+  random: "🎲 学習した「地図」のランダムな場所から、まったく新しい画像を9枚描きます。",
+  similar: "🪞 選んだ写真（なければランダム）の近くを探って、似ているけど違う画像を作ります。写真一覧や生成画像をタップして「これに似た画像」でも指定できます。",
+  mix: "🔀 ランダムに選んだ2枚の写真のあいだを、少しずつ混ぜながら変化させます（左上→右下）。",
+};
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll("#modes button").forEach(b => b.setAttribute("aria-pressed", b.dataset.mode === m));
+  $("modeHelp").textContent = HELP[m];
+}
+const pickPhoto = () => photos[Math.floor(Math.random() * photos.length)];
+
+async function generate() {
+  if (!M.meta || !M.dec) return;
+  const S = M.meta.res, temp = +$("temp").value / 100;
+  const out = tf.tidy(() => {
+    let z;
+    if (mode === "random") z = tf.randomNormal([9, LAT]).mul(temp);
+    else if (mode === "similar") {
+      const src = sourcePhoto?.px ? sourcePhoto : pickPhoto(); sourcePhoto = src;
+      if (src.px) { const mu = encodeMu([src], S); z = mu.tile([9, 1]).add(tf.randomNormal([9, LAT]).mul(temp * 0.6)); z = tf.concat([mu, z.slice([1, 0], [8, LAT])]); }
+      else z = tf.tensor2d([src.z]).tile([9, 1]).add(tf.randomNormal([9, LAT]).mul(temp * 0.6));
+    } else {
+      const mus = encodeMu([pickPhoto(), pickPhoto()], S), a = mus.slice([0, 0], [1, LAT]), b = mus.slice([1, 0], [1, LAT]);
+      const ts = tf.linspace(0, 1, 9).reshape([9, 1]);
+      z = a.mul(tf.sub(1, ts)).add(b.mul(ts)).add(tf.randomNormal([9, LAT]).mul(temp * 0.1));
+    }
+    return { z, img: M.dec.predict(z) };
+  });
+  const zs = await out.z.array(), cvs = tensorToCanvases(out.img); out.z.dispose(); out.img.dispose();
+  const grid = $("genGrid"); grid.innerHTML = "";
+  cvs.forEach((small, i) => {
+    const c = document.createElement("canvas"); c.width = c.height = 192;
+    const g = c.getContext("2d"); g.imageSmoothingQuality = "high"; g.drawImage(small, 0, 0, 192, 192);
+    if (mode === "similar" && i === 0 && sourcePhoto?.px) c.classList.add("src");
+    c.onclick = () => openViewer(small, { z: zs[i] });
+    grid.append(c);
+  });
+  $("genStatus").textContent = mode === "similar" && sourcePhoto?.px ? "枠つきの1枚目が元の写真をモデルが描き直したもの、残りがその仲間です。" : "画像をタップすると大きく表示・保存できます。";
+  if (mode === "similar") sourcePhoto = null;
+}
+
+/* ================= ビューア ================= */
+let viewing = null;
+function openViewer(src, info) {
+  viewing = info;
+  const c = $("viewCanvas"), g = c.getContext("2d");
+  g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "high";
+  g.drawImage(src, 0, 0, c.width, c.height);
+  $("vDelete").hidden = !info.photo;
+  $("vSimilar").disabled = !M.meta;
+  c.toBlob(b => {
+    viewing.blob = b;
+    const f = new File([b], "photolab.png", { type: "image/png" });
+    $("vShare").hidden = !(navigator.canShare && navigator.canShare({ files: [f] }));
+  }, "image/png");
+  $("viewer").showModal();
+}
+$("vClose").onclick = () => $("viewer").close();
+$("viewer").addEventListener("click", e => { if (e.target === $("viewer")) $("viewer").close(); });
+$("vSave").onclick = () => {
+  if (!viewing?.blob) return;
+  const a = document.createElement("a"); a.href = URL.createObjectURL(viewing.blob);
+  a.download = `photolab-${Date.now()}.png`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+$("vShare").onclick = () => {
+  if (!viewing?.blob) return;
+  navigator.share({ files: [new File([viewing.blob], `photolab-${Date.now()}.png`, { type: "image/png" })] }).catch(() => {});
+};
+$("vDelete").onclick = async () => {
+  if (!viewing?.photo || !confirm("この写真を学習データから削除しますか？")) return;
+  await db.del("photos", viewing.photo.id); $("viewer").close(); refreshPhotos();
+};
+$("vSimilar").onclick = () => {
+  sourcePhoto = viewing.photo || { z: viewing.z };
+  $("viewer").close(); switchTab("generate"); setMode("similar"); generate();
+};
+
+/* ================= UI配線 ================= */
+function switchTab(name) {
+  document.querySelectorAll("nav button").forEach(x => x.setAttribute("aria-selected", x.dataset.tab === name));
+  for (const t of ["photos", "train", "generate"]) $("tab-" + t).hidden = t !== name;
+  scrollTo(0, 0);
+}
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+document.querySelectorAll("#modes button").forEach(b => b.onclick = () => setMode(b.dataset.mode));
+$("fileIn").onchange = async (e) => { const fs = [...e.target.files]; e.target.value = ""; await importPhotos(fs); };
+$("btnTrain").onclick = train;
+$("btnGen").onclick = generate;
+$("temp").oninput = () => $("tempVal").textContent = (+$("temp").value / 100).toFixed(1);
+$("btnClearPhotos").onclick = async () => {
+  if (!confirm(`取り込んだ写真 ${photos.length} 枚をすべて削除しますか？（学習済みモデルは残ります）`)) return;
+  await db.clear("photos"); refreshPhotos();
+};
+$("btnResetModel").onclick = async () => {
+  if (!confirm("学習したモデルを消去して、最初からやり直しますか？（写真は消えません）")) return;
+  for (const u of [ENC_URL, DEC_URL]) await tf.io.removeModel(u).catch(() => {});
+  await db.del("meta", "model");
+  M.enc?.dispose(); M.dec?.dispose(); M.opt?.dispose?.();
+  Object.assign(M, { enc: null, dec: null, opt: null, meta: null, losses: [] });
+  drawLoss(); $("preview").innerHTML = ""; $("lossNow").textContent = ""; $("genGrid").innerHTML = "";
+  updateModelInfo(); toast("モデルをリセットしました");
+};
+
+window.__lab = { db, M, photos: () => photos, importPhotos, refreshPhotos, train, generate, buildEncoder, buildDecoder, vaeLoss }; // デバッグ用
+
+(async () => {
+  setMode("random");
+  if (!window.tf) { document.querySelector("main").insertAdjacentHTML("afterbegin", '<div class="card">TensorFlow.jsの読み込みに失敗しました。通信環境を確認してください。</div>'); return; }
+  await refreshPhotos();
+  await loadModels();
+  updateModelInfo();
+  await tf.ready();
+  if (tf.getBackend() === "webgl") {
+    tf.backend().gpgpu?.gl?.canvas?.addEventListener("webglcontextlost", () => {
+      M.stop = true;
+      $("trainStatus").textContent = "⚠️ GPUがリセットされました。ページを再読み込みしてから、もう一度学習してください（写真は残っています）。";
+      toast("GPUがリセットされました。再読み込みしてください", 5000);
+    });
+  } else $("noGpu").hidden = false;
+})();
+</script>
+</body>
+</html>
