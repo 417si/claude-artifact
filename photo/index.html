@@ -119,6 +119,8 @@ button,input,select{font:inherit;color:inherit}
 .knob:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
 .knobwrap .v{font-family:var(--mono);font-size:12px}
 
+.hq{display:flex;gap:12px;align-items:center;margin-top:12px;color:inherit;text-decoration:none}
+.hq b{font-size:13px}
 .foot{margin-top:16px;font-size:11px;color:var(--mute);line-height:1.7}
 .foot a{color:inherit}
 
@@ -223,6 +225,12 @@ button,input,select{font:inherit;color:inherit}
       </div>
     </div>
   </div>
+
+  <a class="deck hq" href="https://colab.research.google.com/github/417si/claude-artifact/blob/main/colab/photolab_hq.ipynb" target="_blank" rel="noopener">
+    <span class="num">HQ</span>
+    <span class="grow"><b>高画質版（Google Colab・無料GPU）</b><br><span class="help">特定のペット・人・モノを覚えさせて、文章で指示した場面の高画質な画像を作れます。PCのブラウザで開くのがおすすめ。</span></span>
+    <span class="mono">↗</span>
+  </a>
 
   <p class="foot">ENGINE：AUTO はGPU（WebGL）を優先し、使えなければCPU（WebAssembly）で計算します。CPUは遅いぶん安定しています。学習中は画面を開いたままにしてください（対応端末では自動でスリープを防ぎます）。</p>
 </div>
