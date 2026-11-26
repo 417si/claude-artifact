@@ -118,7 +118,7 @@ function drawScope(){
   H.pkBar.style.background= db>-1 ? '#ff3b1f' : '#ededed';
 }
 
-let lastStepUI=-2, lastSceneUI=-1, clockT=0;
+let frameN=0, lastStepUI=-2, lastSceneUI=-1, clockT=0;
 function frame(){
   requestAnimationFrame(frame);
   const pn=performance.now(); fps=fps*.92+(1000/Math.max(1,pn-lastFrame))*.08; lastFrame=pn;
@@ -186,7 +186,8 @@ function frame(){
   const act={drum:UI.flash.some(f=>f>=0&&t-f<.09), bass:A.bassNote&&t>=A.bassNote.t&&t<A.bassNote.end, chord:t>=UI.chordT&&t<UI.chordEnd, lead:UI.leadTouches.size>0||UI.ghosts.size>0};
   for(const k in act) UI.tabEls[k].querySelector('.act').classList.toggle('on',!!act[k]);
 
-  drawScope();
+  if(!(UI.tab==='lead' && UI.leadTouches.size) || (frameN&1)) drawScope();
+  frameN++;
   const pg=UI.pages[UI.tab]; if(pg.frame) pg.frame(t,np);
 }
 requestAnimationFrame(frame);

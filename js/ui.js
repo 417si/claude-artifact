@@ -525,7 +525,7 @@ function leadSet(){
 }
 function leadKeysPerRow(){ const N=leadSet().length; return (S.synth.lead.mode|0)===2 ? 13 : N+3; }
 function leadPitchAt(idx){ const set=leadSet(), N=set.length; return leadRoot()+12*Math.floor(idx/N)+set[mod(idx,N)]; }
-function magnet(f){ if(f<.3) return 0; if(f>.7) return 1; const x=(f-.3)/.4; return x*x*(3-2*x); }
+function magnet(f){ if(f<.12) return 0; if(f>.88) return 1; const x=(f-.12)/.76; return x*x*(3-2*x); }
 function leadPitchCont(u){ const i=Math.floor(u), f=u-i, a=leadPitchAt(i), b=leadPitchAt(i+1); return a+(b-a)*magnet(f); }
 const CHOKE_DEAD=18;
 
@@ -554,13 +554,15 @@ function buildLead(){
 
   // ---- touch ----
   let uidc=0;
-  const geom=()=>{ const r=fb.getBoundingClientRect(), K=leadKeysPerRow(); return {r, K, kw:r.width/K, rh:r.height/LROWS, N:leadSet().length}; };
+  let gcache=null;
+  const geom=()=>gcache;
+  const mkGeom=()=>{ const r=fb.getBoundingClientRect(), K=leadKeysPerRow(); gcache={r, K, kw:r.width/K, rh:r.height/LROWS, N:leadSet().length}; return gcache; };
   const calc=(T,e,g)=>{
     const x=e.clientX-g.r.left, y=e.clientY-g.r.top;
     let u=T.k0+(x-T.x0)/g.kw;
     const lo=T.row*g.N-.45, hi=T.row*g.N+g.K-1+.45; u=clamp(u,lo,hi);
     const slide=leadPitchCont(u);
-    const dy=Math.abs(y-T.y0), c=clamp((dy-CHOKE_DEAD)/(g.rh*.6),0,1);
+    const dy=Math.abs(y-T.y0), c=clamp((dy-CHOKE_DEAD)/(g.rh*.45),0,1);
     const choke=(1-(1-c)*(1-c))*S.synth.lead.bend;
     T.u=u; T.choke=choke; T.cx=x; T.cy=y; T.slide=slide;
     T.x=clamp(x/g.r.width,0,1); T.y=clamp(1-y/g.r.height,0,1);
@@ -569,7 +571,7 @@ function buildLead(){
   fb.addEventListener('pointerdown',e=>{
     e.preventDefault(); if(!A.ctx) return;
     fb.setPointerCapture(e.pointerId);
-    const g=geom(), x=e.clientX-g.r.left, y=e.clientY-g.r.top;
+    const g=mkGeom(), x=e.clientX-g.r.left, y=e.clientY-g.r.top;
     const row=clamp(LROWS-1-Math.floor(y/g.rh),0,LROWS-1);
     const j=clamp(Math.floor(x/g.kw),0,g.K-1);
     const T={row, k0:row*g.N+j, x0:x, y0:y, uid:++uidc};
@@ -580,10 +582,10 @@ function buildLead(){
   });
   fb.addEventListener('pointermove',e=>{
     const T=UI.leadTouches.get(e.pointerId); if(!T) return;
-    const g=geom(), prevChoke=T.choke, p=calc(T,e,g);
+    const g=geom()||mkGeom(), p=calc(T,e,g);
     if(Math.abs(p-T.p)<.0005) return;
-    const tc = T.choke!==prevChoke && T.choke>0 ? .018 : .01+S.synth.lead.glide*.08;
-    T.p=p; T.v.setPitch(p+S.synth.lead.oct*12, now(), tc);
+    const tc = T.choke>0 ? .005 : .004+S.synth.lead.glide*.04;
+    T.p=p; T.v.setPitch(p+S.synth.lead.oct*12, A.ctx.currentTime, tc);
     recLead('mv',T.uid,p,T.row,T.x,T.y);
   });
   const up=e=>{
@@ -595,27 +597,23 @@ function buildLead(){
   fb.addEventListener('pointerup',up); fb.addEventListener('pointercancel',up);
 
   // ---- draw ----
-  function drawSurface(t,np){
-    const {c,w,h:hh}=fitCanvas(fb), set=leadSet(), N=set.length, K=leadKeysPerRow(), kw=w/K, rh=hh/LROWS, col=COL.lead, mode=S.synth.lead.mode|0;
-    c.clearRect(0,0,w,hh);
-    const sc=cur(), bar=np?Math.floor(np.step/16):UI.selSlot;
-    const vo=sceneVoicings(sc)[Math.min(bar,sc.bars-1)]||[], chordPc=new Set(vo.map(m=>mod(m,12)));
-    // which keys are sounding
-    const hot=new Map();
-    for(const T of UI.leadTouches.values()) hot.set(Math.round(T.u), 1);
+  const bg=document.createElement('canvas'); let bgKey='', lastDirty=true;
+  function drawBg(w,hh,dpr,chordPc){
+    bg.width=Math.round(w*dpr); bg.height=Math.round(hh*dpr);
+    const c=bg.getContext('2d'); c.setTransform(dpr,0,0,dpr,0,0);
+    const set=leadSet(), N=set.length, K=leadKeysPerRow(), kw=w/K, rh=hh/LROWS, col=COL.lead, mode=S.synth.lead.mode|0;
     c.textAlign='center'; c.textBaseline='middle';
     for(let r=0;r<LROWS;r++){
       const y0=hh-(r+1)*rh;
       for(let j=0;j<K;j++){
         const idx=r*N+j, m=leadPitchAt(idx), pc=mod(m,12), isRoot=mod(m-S.key,12)===0, inS=inScale(m), isCh=chordPc.has(pc);
         const x=j*kw;
-        c.fillStyle = hot.has(idx) ? '#2a2610' : (mode===2 && !inS) ? '#0c0c0c' : (j%2?'#141414':'#171717');
+        c.fillStyle = (mode===2 && !inS) ? '#0c0c0c' : (j%2?'#141414':'#171717');
         c.fillRect(x+1,y0+1,kw-2,rh-2);
         if(isCh){ c.fillStyle=col; c.globalAlpha=.85; c.fillRect(x+4,y0+rh-6,kw-8,2); c.globalAlpha=1; }
         if(isRoot){ c.fillStyle='#ff3b1f'; c.fillRect(x+4,y0+5,5,5); }
-        const big=kw>30;
-        c.font=(big?'900 17px':'900 13px')+' Doto,"IBM Plex Mono",monospace';
-        c.fillStyle= hot.has(idx)? col : isCh ? '#ededed' : (inS? '#8a8a8a':'#3a3a3a');
+        c.font=(kw>30?'900 17px':'900 13px')+' Doto,"IBM Plex Mono",monospace';
+        c.fillStyle= isCh ? '#ededed' : (inS? '#8a8a8a':'#3a3a3a');
         c.fillText(NOTE_NAMES[pc].replace('#','♯')+(isRoot?(Math.floor(m/12)-1):''), x+kw/2, y0+rh*.42);
         c.font='500 7.5px "IBM Plex Mono",monospace'; c.fillStyle='#555';
         const deg=scaleArr().indexOf(mod(m-S.key,12));
@@ -623,22 +621,35 @@ function buildLead(){
       }
       c.fillStyle='#2e2e2e'; c.fillRect(0,y0,w,1);
     }
+  }
+  function drawSurface(t,np){
+    const sc=cur(), bar=np?Math.floor(np.step/16):UI.selSlot;
+    const vo=sceneVoicings(sc)[Math.min(bar,sc.bars-1)]||[], chordPc=new Set(vo.map(m=>mod(m,12)));
+    const w=fb.clientWidth, hh=fb.clientHeight, dpr=Math.min(window.devicePixelRatio||1,3);
+    const key=[w,hh,dpr,S.key,S.scale,S.synth.lead.mode,[...chordPc].sort().join('.')].join('|');
+    const active=UI.leadTouches.size>0 || UI.ghosts.size>0;
+    if(key===bgKey && !active && !lastDirty) return;     // nothing moves: skip the frame
+    if(key!==bgKey){ drawBg(w,hh,dpr,chordPc); bgKey=key; }
+    lastDirty=active;
+    const {c}=fitCanvas(fb), set=leadSet(), N=set.length, K=leadKeysPerRow(), kw=w/K, rh=hh/LROWS, col=COL.lead;
+    c.setTransform(1,0,0,1,0,0); c.clearRect(0,0,fb.width,fb.height); c.drawImage(bg,0,0); c.setTransform(dpr,0,0,dpr,0,0);
+    // sounding keys
+    c.fillStyle='rgba(255,210,26,.16)';
+    for(const T of UI.leadTouches.values()){ const idx=Math.round(T.u), r=T.row, j=idx-r*N; if(j>=0&&j<K) c.fillRect(j*kw+1,hh-(r+1)*rh+1,kw-2,rh-2); }
     // ghosts (recorded playback)
     for(const g of UI.ghosts.values()){
       const x=g.x*w, y=(1-g.y)*hh;
       c.strokeStyle=col; c.globalAlpha=.6; c.lineWidth=1.5; c.beginPath(); c.arc(x,y,13,0,Math.PI*2); c.stroke();
-      c.globalAlpha=.2; c.fillStyle=col; c.beginPath(); c.arc(x,y,13,0,Math.PI*2); c.fill(); c.globalAlpha=1;
+      c.globalAlpha=.2; c.fillStyle=col; c.fill(); c.globalAlpha=1;
     }
-    // touches
+    c.textAlign='center'; c.textBaseline='middle';
     for(const T of UI.leadTouches.values()){
       const rowY=hh-(T.row+1)*rh;
-      // choke dead-zone band
       c.fillStyle='rgba(255,210,26,.06)'; c.fillRect(0,Math.max(rowY,T.y0-CHOKE_DEAD),w,CHOKE_DEAD*2);
-      // slide trail
       c.strokeStyle=col; c.lineWidth=2; c.beginPath(); c.moveTo(T.x0,T.y0); c.lineTo(T.cx,T.y0); c.stroke();
-      // choke line
       if(T.choke>0){ c.setLineDash([3,3]); c.beginPath(); c.moveTo(T.cx,T.y0); c.lineTo(T.cx,T.cy); c.stroke(); c.setLineDash([]); }
-      c.shadowColor=col; c.shadowBlur=18; c.fillStyle=col; c.beginPath(); c.arc(T.cx,T.cy,17,0,Math.PI*2); c.fill(); c.shadowBlur=0;
+      c.fillStyle=col; c.globalAlpha=.18; c.beginPath(); c.arc(T.cx,T.cy,26,0,Math.PI*2); c.fill();
+      c.globalAlpha=1; c.beginPath(); c.arc(T.cx,T.cy,17,0,Math.PI*2); c.fill();
       c.fillStyle='#000'; c.font='600 9px "IBM Plex Mono",monospace';
       c.fillText(noteName(T.p+S.synth.lead.oct*12), T.cx, T.cy);
       c.fillStyle=col; c.font='500 8.5px "IBM Plex Mono",monospace';
@@ -681,7 +692,7 @@ function buildLead(){
     const takes=new Set(sc.lead.map(e=>e.take)).size;
     tinfo.textContent=`TAKES ${pad2(takes)} · EVENTS ${sc.lead.length} · ${Rec.on?(Seq.playing?'● OVERDUB':'● ARMED'):'PLAYBACK'}`;
   }
-  function refresh(){ md.upd(); oc.upd(); bb.textContent='CHOKE +'+S.synth.lead.bend; ed.upd(); tkCache.key=''; }
+  function refresh(){ md.upd(); oc.upd(); bb.textContent='CHOKE +'+S.synth.lead.bend; ed.upd(); tkCache.key=''; bgKey=''; gcache=null; }
   function showSub(){ play.style.display=UI.sub.lead==='play'?'flex':'none'; snd.style.display=UI.sub.lead==='sound'?'flex':'none'; }
   function frame(t,np){ if(UI.sub.lead==='play'){ drawSurface(t,np); drawTake(t,np); } else ed.frame(); }
   return {el,refresh,frame,showSub};
