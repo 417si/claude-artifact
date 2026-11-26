@@ -8,10 +8,10 @@ https://417si.github.io/claude-artifact/
 
 | タブ | 内容 |
 |---|---|
-| 01 DRUM | 6音色（KICK / SNARE / CLAP / C.HAT / O.HAT / PERC）の16ステップ。下のパッドを叩くと発音、REC中は打ち込みとして記録 |
+| 01 DRUM | 6音色（KICK / SNARE / CLAP / C.HAT / O.HAT / PERC）の16ステップ。キット 808 / 909 / TECH / LOFI。パッドを叩くと発音、REC中は打ち込みとして記録 |
 | 02 BASS | モノシンセ。コードのルートに追従する度数ステップ（FOLLOW CHORD）。SOUNDでシンセ編集 |
 | 03 CHORD | 小節ごとにダイアトニックコード（I〜VII、TRI/7TH/SUS/ADD9/POW）。リズム16ステップ、自動ボイスリーディング |
-| 04 LEAD | 6弦ギター風の指板。縦にスライドで音程、横に指を揺らすとベンド/ビブラート。FRET / SCALE / FREE |
+| 04 LEAD | 左が低く右が高い3段の横型キー。タッチはキーの音に吸着、横に動かすと隣の音へスライド、縦に大きく動かすとチョーキング。SCALE / PENTA / CHROM |
 | 05 MIX | フェーダー、メーター、M/S、ディレイ/リバーブ送り、マスター |
 | 06 SONG | BPM・TAP・スウィング、キー/スケール、シーン長、コピー/ペースト、ソングチェイン、BOUNCE（音声書き出し） |
 

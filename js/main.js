@@ -159,10 +159,10 @@ function frame(){
   if(lp===null){ for(const g of UI.ghosts.values()) lp=g.p; }
   if(lp!==null){
     const m=lp+S.synth.lead.oct*12, r=Math.round(m), cents=(m-r)*100;
-    H.note.textContent=noteName(m)+(cents>=0?' +':' ')+Math.round(cents);
-    H.hz.textContent=Math.round(mtof(m))+'HZ';
+    H.note.textContent=noteName(m);
+    H.hz.textContent=Math.round(mtof(m))+'HZ '+(cents>=0?'+':'')+Math.round(cents)+'¢';
     H.tun.style.left=(50+cents)+'%';
-  } else { H.note.textContent='—'; H.hz.textContent='---HZ'; H.tun.style.left='50%'; }
+  } else { H.note.textContent='—'; H.hz.textContent='LEAD ---HZ'; H.tun.style.left='50%'; }
   // leds
   const s16=np?np.step%16:-1;
   if(s16!==lastStepUI || lastSceneUI!==S.scene){

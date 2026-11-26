@@ -124,14 +124,14 @@ function demoProject(){
   c.rhythm=P('x.......x.......');
   return {
     v:1, bpm:112, swing:0.08, key:9, scale:'MIN',
-    scene:0, chain:false, song:[0,0,1,1,2,1,-1,-1], metro:false,
+    scene:0, chain:false, drumKit:1, song:[0,0,1,1,2,1,-1,-1], metro:false,
     kit: [
-      {tune:.45,decay:.45,tone:.5,level:.95},
-      {tune:.5,decay:.4,tone:.55,level:.75},
-      {tune:.5,decay:.45,tone:.5,level:.7},
-      {tune:.6,decay:.15,tone:.6,level:.5},
-      {tune:.6,decay:.45,tone:.6,level:.5},
-      {tune:.45,decay:.35,tone:.5,level:.6}
+      {tune:.4,decay:.45,tone:.45,level:.95},
+      {tune:.5,decay:.45,tone:.5,level:.8},
+      {tune:.45,decay:.4,tone:.4,level:.75},
+      {tune:.55,decay:.3,tone:.55,level:.6},
+      {tune:.55,decay:.4,tone:.55,level:.55},
+      {tune:.4,decay:.3,tone:.75,level:.6}
     ],
     synth: {
       bass:{wave:0,det:.12,sub:.55,cut:.30,res:.38,env:.45,a:.003,d:.22,s:.2,r:.08,glide:.04,drive:.3,oct:0,gate:.55,level:.8},
@@ -143,7 +143,7 @@ function demoProject(){
       bass:{vol:.75,mute:0,solo:0,dly:0,rev:0},
       chord:{vol:.55,mute:0,solo:0,dly:.16,rev:.38},
       lead:{vol:.62,mute:0,solo:0,dly:.3,rev:.3},
-      master:{vol:.85,dlyDiv:2,fb:.38,rev:.55,drive:.15}
+      master:{vol:.85,dlyDiv:2,fb:.38,rev:.55,drive:.15,duck:.3}
     },
     scenes:[a,b,c,emptyScene(4)]
   };

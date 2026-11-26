@@ -52,13 +52,19 @@ function audioInit(){
   for(const t of TRACKS){
     const i = ctx.createGain(), v = ctx.createGain(), a = ctx.createAnalyser(), ds = ctx.createGain(), rs = ctx.createGain();
     a.fftSize=512;
-    i.connect(v); v.connect(a); v.connect(mIn); v.connect(ds); ds.connect(dIn); v.connect(rs); rs.connect(rIn);
-    A.bus[t] = {in:i, vol:v, an:a, dly:ds, rev:rs, buf:new Float32Array(512), peak:0};
+    let duckG=null;
+    if(t==='drum'){
+      const c=ctx.createDynamicsCompressor(); c.threshold.value=-14; c.ratio.value=3; c.knee.value=6; c.attack.value=.008; c.release.value=.09;
+      const mk=ctx.createGain(); mk.gain.value=1.25;
+      i.connect(c); c.connect(mk); mk.connect(v);
+    } else { duckG=ctx.createGain(); i.connect(duckG); duckG.connect(v); } v.connect(a); v.connect(mIn); v.connect(ds); ds.connect(dIn); v.connect(rs); rs.connect(rIn);
+    A.bus[t] = {in:i, duck:duckG, vol:v, an:a, dly:ds, rev:rs, buf:new Float32Array(512), peak:0};
   }
   // ---- persistent mono bass ----
   buildBassSynth();
   for(const p of ['bass','chord','lead']) A.live[p] = {cut:S.synth[p].cut, res:S.synth[p].res};
   applyMix(); applySynth('bass');
+  renderKit();
 }
 
 function tanhCurve(k){
@@ -220,54 +226,8 @@ function makeVoice(part, t, midi, vel, dest){
   return v;
 }
 
-/* ---------- drums ---------- */
-function noiseSrc(t){ const s=A.ctx.createBufferSource(); s.buffer=A.noise; s.loop=true; s.loopStart=Math.random()*1.5; return s; }
+/* ---------- drums: see drums.js ---------- */
 function env(g,t,peak,dec){ g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(peak,t+.001); g.gain.setTargetAtTime(0,t+.002,dec); }
-
-function playDrum(i, t, vel){
-  const ctx=A.ctx, k=S.kit[i], out=A.bus.drum.in, L=k.level*vel;
-  A.drumHits[i]=t;
-  if(i===0){ // KICK
-    const o=ctx.createOscillator(), g=ctx.createGain(); o.type='sine';
-    const base=38+k.tune*44;
-    o.frequency.setValueAtTime(base*7,t); o.frequency.exponentialRampToValueAtTime(base*1.6,t+.018); o.frequency.exponentialRampToValueAtTime(base,t+.07+k.decay*.05);
-    const sh=ctx.createWaveShaper(); sh.curve=tanhCurve(1.5+k.tone*2.5);
-    env(g,t,L*1.1,.05+k.decay*.32);
-    o.connect(sh); sh.connect(g); g.connect(out); o.start(t); o.stop(t+1.8);
-    const n=noiseSrc(), hp=ctx.createBiquadFilter(), ng=ctx.createGain(); hp.type='highpass'; hp.frequency.value=2500;
-    env(ng,t,L*k.tone*.5,.004); n.connect(hp); hp.connect(ng); ng.connect(out); n.start(t); n.stop(t+.05);
-  } else if(i===1){ // SNARE
-    const o=ctx.createOscillator(), g=ctx.createGain(); o.type='triangle';
-    const f=150+k.tune*140; o.frequency.setValueAtTime(f*1.6,t); o.frequency.exponentialRampToValueAtTime(f,t+.03);
-    env(g,t,L*(1-k.tone)*.9,.05+k.decay*.08); o.connect(g); g.connect(out); o.start(t); o.stop(t+.6);
-    const n=noiseSrc(), bp=ctx.createBiquadFilter(), ng=ctx.createGain(); bp.type='highpass'; bp.frequency.value=900+k.tune*1600;
-    env(ng,t,L*(.35+k.tone*.6),.04+k.decay*.12); n.connect(bp); bp.connect(ng); ng.connect(out); n.start(t); n.stop(t+.9);
-  } else if(i===2){ // CLAP
-    const n=noiseSrc(), bp=ctx.createBiquadFilter(), g=ctx.createGain(); bp.type='bandpass'; bp.frequency.value=800+k.tune*1400; bp.Q.value=1.2+k.tone*2;
-    g.gain.setValueAtTime(0,t);
-    const sp=.008+k.tone*.006;
-    for(let j=0;j<3;j++){ const tt=t+j*sp; g.gain.setValueAtTime(L,tt); g.gain.setTargetAtTime(0,tt+.001,.004); }
-    g.gain.setValueAtTime(L*.8,t+3*sp); g.gain.setTargetAtTime(0,t+3*sp+.001,.04+k.decay*.2);
-    n.connect(bp); bp.connect(g); g.connect(out); n.start(t); n.stop(t+1.2);
-  } else if(i===3 || i===4){ // HATS
-    const open=i===4, g=ctx.createGain(), bp=ctx.createBiquadFilter(), hp=ctx.createBiquadFilter();
-    bp.type='bandpass'; bp.frequency.value=9000+k.tune*3000; bp.Q.value=.8; hp.type='highpass'; hp.frequency.value=5000+k.tone*4000;
-    const base=36+k.tune*20, rat=[2,3,4.16,5.43,6.79,8.21], oscs=[];
-    const mx=ctx.createGain(); mx.gain.value=.18;
-    for(const r of rat){ const o=ctx.createOscillator(); o.type='square'; o.frequency.value=base*r; o.connect(mx); oscs.push(o); }
-    const n=noiseSrc(), ngn=ctx.createGain(); ngn.gain.value=.35; n.connect(ngn); ngn.connect(bp);
-    mx.connect(bp); bp.connect(hp); hp.connect(g); g.connect(out);
-    const dec = open ? .08+k.decay*.45 : .01+k.decay*.06;
-    env(g,t,L*.9,dec);
-    const st=t+dec*7+.05; oscs.forEach(o=>{o.start(t);o.stop(st);}); n.start(t); n.stop(st);
-    if(open) A.lastOHat=g;
-    else if(A.lastOHat){ A.lastOHat.gain.cancelScheduledValues(t); A.lastOHat.gain.setTargetAtTime(0,t,.008); A.lastOHat=null; }
-  } else { // PERC
-    const o=ctx.createOscillator(), g=ctx.createGain(); o.type= k.tone>.5?'sine':'triangle';
-    const f=140+k.tune*520; o.frequency.setValueAtTime(f*(1+k.tone*1.5),t); o.frequency.exponentialRampToValueAtTime(f,t+.03+k.tone*.04);
-    env(g,t,L*.85,.03+k.decay*.22); o.connect(g); g.connect(out); o.start(t); o.stop(t+1.4);
-  }
-}
 
 function click(t, accent){
   const ctx=A.ctx, o=ctx.createOscillator(), g=ctx.createGain();
