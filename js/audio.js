@@ -1,0 +1,300 @@
+'use strict';
+/* ==========================================================
+   LD-1 · audio engine (Web Audio)
+   ========================================================== */
+const A = {
+  ctx:null, bus:{}, voices:new Set(), live:{}, noise:null,
+  drumHits:new Array(6).fill(0), lastOHat:null
+};
+
+function audioInit(){
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AC({latencyHint:'interactive'});
+  A.ctx = ctx;
+  try{ if(navigator.audioSession) navigator.audioSession.type='playback'; }catch(e){}
+
+  // noise buffer
+  const nb = ctx.createBuffer(1, ctx.sampleRate*2, ctx.sampleRate), nd = nb.getChannelData(0);
+  for(let i=0;i<nd.length;i++) nd[i]=Math.random()*2-1;
+  A.noise = nb;
+
+  // ---- master ----
+  const mIn = ctx.createGain();
+  const dry = ctx.createGain(), wet = ctx.createGain();
+  const sh = ctx.createWaveShaper(); sh.curve = tanhCurve(3.2); sh.oversample='2x';
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value=-16; comp.ratio.value=3.5; comp.knee.value=10; comp.attack.value=.006; comp.release.value=.18;
+  const lim = ctx.createDynamicsCompressor();
+  lim.threshold.value=-1.5; lim.ratio.value=20; lim.knee.value=0; lim.attack.value=.001; lim.release.value=.08;
+  const mOut = ctx.createGain();
+  const an = ctx.createAnalyser(); an.fftSize=2048; an.smoothingTimeConstant=.72;
+  mIn.connect(dry); mIn.connect(sh); sh.connect(wet);
+  dry.connect(comp); wet.connect(comp); comp.connect(lim); lim.connect(mOut); mOut.connect(an); an.connect(ctx.destination);
+  A.master = {in:mIn, dry, wet, out:mOut, an, comp};
+
+  // ---- delay (ping-pong) ----
+  const dIn = ctx.createGain();
+  const d1 = ctx.createDelay(2), d2 = ctx.createDelay(2);
+  const fb = ctx.createGain(), dlp = ctx.createBiquadFilter(); dlp.type='lowpass'; dlp.frequency.value=3800;
+  const dhp = ctx.createBiquadFilter(); dhp.type='highpass'; dhp.frequency.value=180;
+  const pL = ctx.createStereoPanner(), pR = ctx.createStereoPanner(); pL.pan.value=-.7; pR.pan.value=.7;
+  dIn.connect(dhp); dhp.connect(d1); d1.connect(pL); d1.connect(d2); d2.connect(pR); d2.connect(dlp); dlp.connect(fb); fb.connect(d1);
+  pL.connect(mIn); pR.connect(mIn);
+  A.delay = {in:dIn, d1, d2, fb};
+
+  // ---- reverb ----
+  const rIn = ctx.createGain(), conv = ctx.createConvolver(), rlp = ctx.createBiquadFilter();
+  rlp.type='lowpass'; rlp.frequency.value=6500;
+  rIn.connect(conv); conv.connect(rlp); rlp.connect(mIn);
+  A.rev = {in:rIn, conv, size:-1};
+
+  // ---- track buses ----
+  for(const t of TRACKS){
+    const i = ctx.createGain(), v = ctx.createGain(), a = ctx.createAnalyser(), ds = ctx.createGain(), rs = ctx.createGain();
+    a.fftSize=512;
+    i.connect(v); v.connect(a); v.connect(mIn); v.connect(ds); ds.connect(dIn); v.connect(rs); rs.connect(rIn);
+    A.bus[t] = {in:i, vol:v, an:a, dly:ds, rev:rs, buf:new Float32Array(512), peak:0};
+  }
+  // ---- persistent mono bass ----
+  buildBassSynth();
+  for(const p of ['bass','chord','lead']) A.live[p] = {cut:S.synth[p].cut, res:S.synth[p].res};
+  applyMix(); applySynth('bass');
+}
+
+function tanhCurve(k){
+  const n=1024, c=new Float32Array(n), t=Math.tanh(k);
+  for(let i=0;i<n;i++){ const x=i/(n-1)*2-1; c[i]=Math.tanh(k*x)/t; }
+  return c;
+}
+function makeIR(sec){
+  const ctx=A.ctx, len=Math.floor(ctx.sampleRate*sec), b=ctx.createBuffer(2,len,ctx.sampleRate);
+  for(let ch=0;ch<2;ch++){
+    const d=b.getChannelData(ch);
+    for(let i=0;i<len;i++){ const x=i/len; d[i]=(Math.random()*2-1)*Math.pow(1-x,2.6)*(i<ctx.sampleRate*.012?i/(ctx.sampleRate*.012):1); }
+  }
+  return b;
+}
+function stepDur(){ return 60/S.bpm/4; }
+
+/* ---------- mix ---------- */
+let _irT=0;
+function applyMix(){
+  if(!A.ctx) return;
+  const now=A.ctx.currentTime, M=S.mix, anySolo=TRACKS.some(t=>M[t].solo);
+  for(const t of TRACKS){
+    const m=M[t], b=A.bus[t];
+    const g = m.mute ? 0 : (anySolo && !m.solo ? 0 : m.vol*m.vol*1.2);
+    b.vol.gain.setTargetAtTime(g, now, .02);
+    b.dly.gain.setTargetAtTime(m.dly, now, .02);
+    b.rev.gain.setTargetAtTime(m.rev*1.2, now, .02);
+  }
+  const ms=M.master;
+  A.master.out.gain.setTargetAtTime(ms.vol*ms.vol*1.1, now, .02);
+  A.master.dry.gain.setTargetAtTime(1-ms.drive*.55, now, .02);
+  A.master.wet.gain.setTargetAtTime(ms.drive*.7, now, .02);
+  A.delay.fb.gain.setTargetAtTime(ms.fb*.85, now, .03);
+  const dt = stepDur()*DLY_DIVS[ms.dlyDiv].s;
+  A.delay.d1.delayTime.setTargetAtTime(dt, now, .05);
+  A.delay.d2.delayTime.setTargetAtTime(dt, now, .05);
+  const sz = Math.round(ms.rev*20)/20;
+  if(sz!==A.rev.size){
+    A.rev.size=sz; clearTimeout(_irT);
+    _irT=setTimeout(()=>{ A.rev.conv.buffer = makeIR(.8+sz*4.2); },120);
+  }
+}
+
+/* ---------- synth voices ---------- */
+function liveDetune(part){ return A.live[part].cut*9.5*1200; }
+function applyLive(part){
+  if(!A.ctx) return;
+  const now=A.ctx.currentTime, det=liveDetune(part), q=resQ(A.live[part].res);
+  for(const v of A.voices){ if(v.part===part){ v.flt.detune.setTargetAtTime(det,now,.012); v.flt.Q.setTargetAtTime(q,now,.012); } }
+  if(part==='bass' && A.bs){ A.bs.f1.detune.setTargetAtTime(det,now,.012); A.bs.f2.detune.setTargetAtTime(det,now,.012); A.bs.f1.Q.setTargetAtTime(q,now,.012); }
+}
+function applySynth(part){
+  if(!A.ctx) return;
+  const p=S.synth[part];
+  if(!A.live[part]) A.live[part]={cut:p.cut,res:p.res};
+  if(part==='bass' && A.bs){
+    const b=A.bs, now=A.ctx.currentTime;
+    b.o1.type=b.o2.type=WAVES[p.wave];
+    b.o1.detune.setTargetAtTime(-p.det*25,now,.02); b.o2.detune.setTargetAtTime(p.det*25,now,.02);
+    b.subG.gain.setTargetAtTime(p.sub*.9,now,.02);
+    b.drv.curve = tanhCurve(1+p.drive*9);
+    b.post.gain.setTargetAtTime(p.level/(1+p.drive*1.6),now,.02);
+  }
+  for(const v of A.voices){ if(v.part===part && v.lvl){ v.lvl.gain.setTargetAtTime(p.level, A.ctx.currentTime, .02);} }
+}
+
+function buildBassSynth(){
+  const ctx=A.ctx, b={};
+  b.o1=ctx.createOscillator(); b.o2=ctx.createOscillator(); b.sub=ctx.createOscillator(); b.sub.type='sine';
+  b.mix=ctx.createGain(); b.mix.gain.value=.45; b.subG=ctx.createGain();
+  b.f1=ctx.createBiquadFilter(); b.f2=ctx.createBiquadFilter(); b.f1.type=b.f2.type='lowpass'; b.f2.Q.value=.6;
+  b.f1.frequency.value=30; b.f2.frequency.value=30;
+  b.drv=ctx.createWaveShaper(); b.drv.oversample='2x'; b.vca=ctx.createGain(); b.vca.gain.value=0; b.post=ctx.createGain();
+  b.o1.connect(b.mix); b.o2.connect(b.mix); b.sub.connect(b.subG);
+  b.mix.connect(b.f1); b.f1.connect(b.f2); b.f2.connect(b.drv); b.drv.connect(b.vca); b.subG.connect(b.vca);
+  b.vca.connect(b.post); b.post.connect(A.bus.bass.in);
+  const f=mtof(45); [b.o1,b.o2].forEach(o=>o.frequency.value=f); b.sub.frequency.value=f/2;
+  b.o1.start(); b.o2.start(); b.sub.start();
+  A.bs=b;
+}
+let bassUntil=0;
+function bassNote(t, midi, dur, vel){
+  const b=A.bs, p=S.synth.bass, f=mtof(midi);
+  const det=liveDetune('bass');
+  for(const o of [b.o1,b.o2]){ o.frequency.cancelScheduledValues(t); }
+  b.sub.frequency.cancelScheduledValues(t);
+  if(p.glide>.01 && t < bassUntil+0.03){
+    b.o1.frequency.setTargetAtTime(f,t,p.glide*.12); b.o2.frequency.setTargetAtTime(f,t,p.glide*.12); b.sub.frequency.setTargetAtTime(f/2,t,p.glide*.12);
+  } else {
+    b.o1.frequency.setValueAtTime(f,t); b.o2.frequency.setValueAtTime(f,t); b.sub.frequency.setValueAtTime(f/2,t);
+  }
+  const kt=Math.pow(2,(midi-48)/12*.5), base=30*kt, peak=base*Math.pow(2,p.env*7.5*(.6+vel*.4));
+  for(const fl of [b.f1,b.f2]){
+    fl.frequency.cancelScheduledValues(t);
+    fl.frequency.setTargetAtTime(peak,t,.0015);
+    fl.frequency.setTargetAtTime(base,t+.006,Math.max(.01,p.d/3));
+    fl.detune.setTargetAtTime(det,t,.01);
+  }
+  const g=b.vca.gain;
+  g.cancelScheduledValues(t);
+  g.setTargetAtTime(vel,t,Math.max(.0008,p.a/3));
+  g.setTargetAtTime(vel*Math.max(p.s,.001),t+p.a,Math.max(.01,p.d/3));
+  g.setTargetAtTime(0,t+dur,Math.max(.005,p.r/4));
+  bassUntil=t+dur;
+  A.bassNote={midi,t,end:t+dur};
+}
+
+function makeVoice(part, t, midi, vel, dest){
+  const ctx=A.ctx, p=S.synth[part], f=mtof(midi);
+  const v={part, midi};
+  v.o1=ctx.createOscillator(); v.o2=ctx.createOscillator();
+  v.o1.type=v.o2.type=WAVES[p.wave];
+  v.o1.frequency.setValueAtTime(f,t); v.o2.frequency.setValueAtTime(f,t);
+  v.o1.detune.value=-p.det*28; v.o2.detune.value=p.det*28;
+  const pl=ctx.createStereoPanner(), pr=ctx.createStereoPanner();
+  const sp = part==='chord' ? .55 : .25; pl.pan.value=-sp*p.det*1.6; pr.pan.value=sp*p.det*1.6;
+  v.o1.connect(pl); v.o2.connect(pr);
+  v.flt=ctx.createBiquadFilter(); v.flt.type='lowpass'; v.flt.Q.value=resQ(A.live[part].res);
+  v.flt.detune.value=liveDetune(part);
+  const mix=ctx.createGain(); mix.gain.value=.32;
+  pl.connect(mix); pr.connect(mix); mix.connect(v.flt);
+  if(p.sub>.01){
+    v.sub=ctx.createOscillator(); v.sub.type='sine'; v.sub.frequency.setValueAtTime(f/2,t);
+    const sg=ctx.createGain(); sg.gain.value=p.sub*.5; v.sub.connect(sg); sg.connect(v.flt);
+  }
+  let src=v.flt;
+  if(p.drive>.02){ const d=ctx.createWaveShaper(); d.curve=tanhCurve(1+p.drive*7); v.flt.connect(d); src=d; }
+  v.vca=ctx.createGain(); v.vca.gain.value=0;
+  v.lvl=ctx.createGain(); v.lvl.gain.value=p.level;
+  src.connect(v.vca); v.vca.connect(v.lvl); v.lvl.connect(dest||A.bus[part].in);
+  const kt=Math.pow(2,(midi-60)/12*.5), base=30*kt, peak=base*Math.pow(2,p.env*7.5);
+  v.flt.frequency.setValueAtTime(base,t);
+  v.flt.frequency.setTargetAtTime(peak,t,Math.max(.002,p.a/3));
+  v.flt.frequency.setTargetAtTime(base*Math.pow(2,p.env*7.5*p.s*.5),t+p.a,Math.max(.02,p.d/3));
+  const g=v.vca.gain;
+  g.setValueAtTime(0,t);
+  g.setTargetAtTime(vel,t,Math.max(.0008,p.a/3));
+  g.setTargetAtTime(vel*Math.max(p.s,.0001),t+p.a,Math.max(.01,p.d/3));
+  v.o1.start(t); v.o2.start(t); if(v.sub) v.sub.start(t);
+  v.end=Infinity;
+  v.release=(tOff)=>{
+    if(v.end!==Infinity) return;
+    tOff=Math.max(tOff, ctx.currentTime);
+    const r=Math.max(.01,S.synth[part].r);
+    g.cancelScheduledValues(tOff);
+    g.setTargetAtTime(0,tOff,r/4);
+    const stopT=tOff+r*1.6+.05;
+    v.o1.stop(stopT); v.o2.stop(stopT); if(v.sub) v.sub.stop(stopT);
+    v.end=stopT;
+  };
+  v.setPitch=(m,tt,tc)=>{
+    v.midi=m; const ff=mtof(m);
+    v.o1.frequency.setTargetAtTime(ff,tt,tc); v.o2.frequency.setTargetAtTime(ff,tt,tc);
+    if(v.sub) v.sub.frequency.setTargetAtTime(ff/2,tt,tc);
+  };
+  v.o1.onended=()=>{ A.voices.delete(v); try{v.lvl.disconnect();}catch(e){} };
+  A.voices.add(v);
+  return v;
+}
+
+/* ---------- drums ---------- */
+function noiseSrc(t){ const s=A.ctx.createBufferSource(); s.buffer=A.noise; s.loop=true; s.loopStart=Math.random()*1.5; return s; }
+function env(g,t,peak,dec){ g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(peak,t+.001); g.gain.setTargetAtTime(0,t+.002,dec); }
+
+function playDrum(i, t, vel){
+  const ctx=A.ctx, k=S.kit[i], out=A.bus.drum.in, L=k.level*vel;
+  A.drumHits[i]=t;
+  if(i===0){ // KICK
+    const o=ctx.createOscillator(), g=ctx.createGain(); o.type='sine';
+    const base=38+k.tune*44;
+    o.frequency.setValueAtTime(base*7,t); o.frequency.exponentialRampToValueAtTime(base*1.6,t+.018); o.frequency.exponentialRampToValueAtTime(base,t+.07+k.decay*.05);
+    const sh=ctx.createWaveShaper(); sh.curve=tanhCurve(1.5+k.tone*2.5);
+    env(g,t,L*1.1,.05+k.decay*.32);
+    o.connect(sh); sh.connect(g); g.connect(out); o.start(t); o.stop(t+1.8);
+    const n=noiseSrc(), hp=ctx.createBiquadFilter(), ng=ctx.createGain(); hp.type='highpass'; hp.frequency.value=2500;
+    env(ng,t,L*k.tone*.5,.004); n.connect(hp); hp.connect(ng); ng.connect(out); n.start(t); n.stop(t+.05);
+  } else if(i===1){ // SNARE
+    const o=ctx.createOscillator(), g=ctx.createGain(); o.type='triangle';
+    const f=150+k.tune*140; o.frequency.setValueAtTime(f*1.6,t); o.frequency.exponentialRampToValueAtTime(f,t+.03);
+    env(g,t,L*(1-k.tone)*.9,.05+k.decay*.08); o.connect(g); g.connect(out); o.start(t); o.stop(t+.6);
+    const n=noiseSrc(), bp=ctx.createBiquadFilter(), ng=ctx.createGain(); bp.type='highpass'; bp.frequency.value=900+k.tune*1600;
+    env(ng,t,L*(.35+k.tone*.6),.04+k.decay*.12); n.connect(bp); bp.connect(ng); ng.connect(out); n.start(t); n.stop(t+.9);
+  } else if(i===2){ // CLAP
+    const n=noiseSrc(), bp=ctx.createBiquadFilter(), g=ctx.createGain(); bp.type='bandpass'; bp.frequency.value=800+k.tune*1400; bp.Q.value=1.2+k.tone*2;
+    g.gain.setValueAtTime(0,t);
+    const sp=.008+k.tone*.006;
+    for(let j=0;j<3;j++){ const tt=t+j*sp; g.gain.setValueAtTime(L,tt); g.gain.setTargetAtTime(0,tt+.001,.004); }
+    g.gain.setValueAtTime(L*.8,t+3*sp); g.gain.setTargetAtTime(0,t+3*sp+.001,.04+k.decay*.2);
+    n.connect(bp); bp.connect(g); g.connect(out); n.start(t); n.stop(t+1.2);
+  } else if(i===3 || i===4){ // HATS
+    const open=i===4, g=ctx.createGain(), bp=ctx.createBiquadFilter(), hp=ctx.createBiquadFilter();
+    bp.type='bandpass'; bp.frequency.value=9000+k.tune*3000; bp.Q.value=.8; hp.type='highpass'; hp.frequency.value=5000+k.tone*4000;
+    const base=36+k.tune*20, rat=[2,3,4.16,5.43,6.79,8.21], oscs=[];
+    const mx=ctx.createGain(); mx.gain.value=.18;
+    for(const r of rat){ const o=ctx.createOscillator(); o.type='square'; o.frequency.value=base*r; o.connect(mx); oscs.push(o); }
+    const n=noiseSrc(), ngn=ctx.createGain(); ngn.gain.value=.35; n.connect(ngn); ngn.connect(bp);
+    mx.connect(bp); bp.connect(hp); hp.connect(g); g.connect(out);
+    const dec = open ? .08+k.decay*.45 : .01+k.decay*.06;
+    env(g,t,L*.9,dec);
+    const st=t+dec*7+.05; oscs.forEach(o=>{o.start(t);o.stop(st);}); n.start(t); n.stop(st);
+    if(open) A.lastOHat=g;
+    else if(A.lastOHat){ A.lastOHat.gain.cancelScheduledValues(t); A.lastOHat.gain.setTargetAtTime(0,t,.008); A.lastOHat=null; }
+  } else { // PERC
+    const o=ctx.createOscillator(), g=ctx.createGain(); o.type= k.tone>.5?'sine':'triangle';
+    const f=140+k.tune*520; o.frequency.setValueAtTime(f*(1+k.tone*1.5),t); o.frequency.exponentialRampToValueAtTime(f,t+.03+k.tone*.04);
+    env(g,t,L*.85,.03+k.decay*.22); o.connect(g); g.connect(out); o.start(t); o.stop(t+1.4);
+  }
+}
+
+function click(t, accent){
+  const ctx=A.ctx, o=ctx.createOscillator(), g=ctx.createGain();
+  o.frequency.value=accent?1760:1180; env(g,t,.25,.012); o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t+.1);
+}
+
+/* ---------- bounce (record master) ---------- */
+const Bounce={rec:null,chunks:[],t0:0};
+function bounceToggle(cb){
+  if(Bounce.rec){ Bounce.rec.stop(); return; }
+  if(!window.MediaRecorder){ cb && cb('error','MediaRecorder unsupported'); return; }
+  if(!A.streamDest){ A.streamDest=A.ctx.createMediaStreamDestination(); A.master.out.connect(A.streamDest); }
+  let mime='';
+  for(const m of ['audio/mp4','audio/webm;codecs=opus','audio/webm']) if(MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)){ mime=m; break; }
+  const r=new MediaRecorder(A.streamDest.stream, mime?{mimeType:mime}:undefined);
+  Bounce.chunks=[]; Bounce.rec=r; Bounce.t0=performance.now();
+  r.ondataavailable=e=>{ if(e.data.size) Bounce.chunks.push(e.data); };
+  r.onstop=async()=>{
+    const type=r.mimeType||mime||'audio/mp4', ext=type.includes('mp4')?'m4a':'webm';
+    const blob=new Blob(Bounce.chunks,{type}); Bounce.rec=null;
+    const d=new Date(), name=`LD1_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}.${ext}`;
+    const file=new File([blob],name,{type});
+    try{
+      if(navigator.canShare && navigator.canShare({files:[file]})){ await navigator.share({files:[file],title:name}); cb&&cb('done',name); return; }
+    }catch(e){ if(e.name==='AbortError'){ cb&&cb('done',name); return; } }
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); a.remove();
+    cb&&cb('done',name);
+  };
+  r.start(250); cb&&cb('start');
+}

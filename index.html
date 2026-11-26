@@ -1,446 +1,73 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>ポケットLLM</title>
-<meta name="description" content="ブラウザの中だけで動くAIチャット。会話ログはCookieに保存。">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>">
-<style>
-:root{
-  --bg:#f6f5f1;--panel:#ffffff;--fg:#1d1c1a;--muted:#6f6b64;--line:#e3e0d8;
-  --accent:#2f6f5e;--accent-fg:#fff;--user:#e4efe9;--warn:#a5521b;--code:#f0eee8;
-  --radius:14px;
-}
-@media (prefers-color-scheme:dark){
-  :root{--bg:#161715;--panel:#1f201e;--fg:#ecebe6;--muted:#9b978e;--line:#33342f;
-    --accent:#6cc0a5;--accent-fg:#0d1f19;--user:#24352e;--warn:#e39a62;--code:#2a2b28}
-}
-*{box-sizing:border-box}
-[hidden]{display:none!important}
-html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--fg);
-  font:15px/1.65 system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;
-  display:flex;flex-direction:column}
-button,select,textarea{font:inherit;color:inherit}
-button{cursor:pointer;border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:6px 12px}
-button:hover:not(:disabled){border-color:var(--muted)}
-button:disabled{opacity:.45;cursor:default}
-button.primary{background:var(--accent);color:var(--accent-fg);border-color:transparent;font-weight:600}
-
-header{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);
-  background:var(--panel);flex-wrap:wrap}
-header h1{font-size:16px;margin:0;font-weight:700;white-space:nowrap}
-#status{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;min-width:0}
-#status .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
-#status.ready .dot{background:#3fae7c}
-#status.busy .dot{background:#e0a030;animation:pulse 1s infinite}
-@keyframes pulse{50%{opacity:.3}}
-header .spacer{flex:1}
-header .tools{display:flex;gap:6px}
-header .tools button{font-size:13px;padding:5px 10px}
-
-main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
-.wrap{max-width:760px;margin:0 auto;padding:20px 16px 8px}
-
-/* setup */
-#setup{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px}
-#setup h2{margin:0 0 4px;font-size:18px}
-#setup p.lead{margin:0 0 16px;color:var(--muted);font-size:14px}
-.models{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:16px}
-.model{display:block;border:1.5px solid var(--line);border-radius:12px;padding:12px;cursor:pointer;position:relative}
-.model:hover{border-color:var(--muted)}
-.model input{position:absolute;opacity:0}
-.model:has(input:checked){border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
-.model b{display:block;font-size:14px}
-.model span{display:block;font-size:12px;color:var(--muted)}
-.model .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:99px;background:var(--user);color:var(--fg);margin-top:6px}
-.model .cached{background:var(--accent);color:var(--accent-fg)}
-.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-#progress{margin-top:14px;display:none}
-#progress .bar{height:8px;background:var(--line);border-radius:99px;overflow:hidden}
-#progress .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
-#progress .txt{font-size:12px;color:var(--muted);margin-top:6px;word-break:break-all}
-.note{font-size:12px;color:var(--muted);margin-top:14px;line-height:1.6}
-.err{color:var(--warn);font-size:14px;margin-top:12px;white-space:pre-wrap}
-
-/* chat */
-#chat{display:flex;flex-direction:column;gap:14px;padding-bottom:8px}
-.msg{max-width:92%;padding:10px 14px;border-radius:var(--radius);white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere}
-.msg.u{align-self:flex-end;background:var(--user);border-bottom-right-radius:4px}
-.msg.a{align-self:flex-start;background:var(--panel);border:1px solid var(--line);border-bottom-left-radius:4px}
-.msg.a.typing::after{content:"▍";animation:pulse .8s infinite;color:var(--accent)}
-.msg pre{background:var(--code);padding:10px;border-radius:8px;overflow-x:auto;white-space:pre;margin:6px 0;font-size:13px}
-.msg code{background:var(--code);padding:1px 5px;border-radius:5px;font-size:.92em}
-.msg pre code{background:none;padding:0}
-.msg .meta{display:block;font-size:11px;color:var(--muted);margin-top:4px;white-space:normal}
-.empty{text-align:center;color:var(--muted);padding:40px 0 10px}
-.empty .big{font-size:40px}
-.chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:14px}
-.chips button{font-size:13px;border-radius:99px}
-.sysmsg{align-self:center;font-size:12px;color:var(--muted)}
-
-/* composer */
-footer{border-top:1px solid var(--line);background:var(--panel);padding:10px 16px calc(10px + env(safe-area-inset-bottom))}
-footer .wrap{padding:0;display:flex;gap:8px;align-items:flex-end}
-#input{flex:1;resize:none;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--bg);
-  max-height:200px;min-height:44px;line-height:1.5;outline:none}
-#input:focus{border-color:var(--accent)}
-#send{height:44px;min-width:64px}
-#meter{max-width:760px;margin:6px auto 0;font-size:11px;color:var(--muted);display:flex;gap:8px;align-items:center}
-#meter .bar{flex:0 0 80px;height:4px;background:var(--line);border-radius:99px;overflow:hidden}
-#meter .bar i{display:block;height:100%;background:var(--accent);width:0}
-@media (max-width:520px){
-  header .tools button span{display:none}
-  .msg{max-width:100%}
-}
-</style>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="LD-1">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="format-detection" content="telephone=no">
+<title>LD-1 · Loop Device</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="preload" href="fonts/doto.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<header>
-  <h1>💬 ポケットLLM</h1>
-  <div id="status"><span class="dot"></span><span id="statusText">未読み込み</span></div>
-  <div class="spacer"></div>
-  <div class="tools">
-    <button id="btnModel" title="モデルを変更">🧠<span> モデル</span></button>
-    <button id="btnNew" title="新しい会話（ログを消去）">🆕<span> 新しい会話</span></button>
-    <button id="btnExport" title="ログをJSONで保存">⬇︎<span> 書き出し</span></button>
+<div id="app">
+  <header id="hdr">
+    <div class="r0">
+      <span class="brand">LD<b>—</b>1</span>
+      <span id="hSr">--.-K</span><span id="hLat">LAT --</span><span id="hVox">VOX 00</span><span id="hJit">JIT -.-</span>
+      <span class="sp"></span>
+      <span id="hRec" class="rec-ind">● REC</span>
+      <span id="hClock">--:--</span>
+    </div>
+    <div class="r1">
+      <div class="cell" id="bpmBox"><div class="lbl">BPM <i>↕</i></div><div class="big" id="hBpm">120</div></div>
+      <div class="cell"><div class="lbl">BAR.BT.ST</div><div class="big" id="hPos">01.1.1</div></div>
+      <div class="cell w"><div class="lbl" id="hKey">A MIN</div><div class="mid" id="hChord">Am</div><div class="sub" id="hChordN">— — —</div></div>
+      <div class="cell w"><div class="lbl">LEAD <span id="hHz">0HZ</span></div><div class="mid" id="hNote">—</div><div class="tuner"><i id="hTun"></i></div></div>
+    </div>
+    <div class="r2">
+      <canvas id="scope"></canvas>
+      <div class="pk"><div class="lbl">PEAK</div><div id="hPk">-∞</div><div class="vm"><i id="hPkBar"></i></div></div>
+    </div>
+    <div class="r3">
+      <div id="leds" class="leds"></div>
+      <div id="bars" class="bars"></div>
+      <span id="hScene">SCN A</span>
+    </div>
+  </header>
+  <nav id="tabs"></nav>
+  <main id="panel"></main>
+  <footer id="trans">
+    <button id="bPlay" class="tb play"><svg viewBox="0 0 20 20"><path class="ic-play" d="M6 4l10 6-10 6z"/><rect class="ic-stop" x="5" y="5" width="10" height="10"/></svg></button>
+    <button id="bRec" class="tb rec"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="5.5"/></svg></button>
+    <button id="bMet" class="tb met"><span>CLK</span></button>
+    <div class="scenes" id="scenes"></div>
+  </footer>
+</div>
+<div id="boot">
+  <div class="bt-grid"></div>
+  <div class="bt-in">
+    <div class="bt-logo">LD-1</div>
+    <div class="bt-sub">LOOP DEVICE · POCKET DAW</div>
+    <div class="bt-spec">
+      <span>4 SCENES</span><span>6 DRUM VOICES</span><span>MONO BASS</span><span>POLY CHORD</span><span>STRING LEAD</span><span>MOTION REC</span>
+    </div>
+    <div class="bt-tap"><i></i>TAP TO POWER ON</div>
+    <div class="bt-note">ホーム画面に追加するとフルスクリーンで動きます · 音が出ない時は消音スイッチを確認</div>
   </div>
-</header>
-
-<main id="scroller">
-  <div class="wrap">
-    <section id="setup" hidden>
-      <h2>ブラウザの中で動くAI</h2>
-      <p class="lead">モデルを選んで「読み込む」を押すだけ。初回だけモデルをダウンロードし、以後はブラウザにキャッシュされます。会話の計算はすべてこの端末のGPUで行われます。</p>
-      <div class="models" id="models"></div>
-      <div class="row">
-        <button class="primary" id="btnLoad">読み込む</button>
-        <button id="btnCancelSetup" hidden>閉じる</button>
-      </div>
-      <div id="progress"><div class="bar"><i></i></div><div class="txt"></div></div>
-      <div class="err" id="err"></div>
-      <p class="note">
-        ・WebGPU対応ブラウザが必要です（Chrome / Edge 最新版、Safari 26 以降など）。<br>
-        ・会話ログはこのサイトのCookieに圧縮して保存します（容量は約20KB。あふれた分は古い順に消えます）。Cookieの仕様上、ページを開くときにGitHub Pagesのサーバーへ送信されます。<br>
-        ・モデルの重みはHugging Faceから取得します。
-      </p>
-    </section>
-
-    <section id="chat"></section>
-  </div>
-</main>
-
-<footer>
-  <div class="wrap">
-    <textarea id="input" rows="1" placeholder="メッセージを入力" title="Enterで送信 / Shift+Enterで改行" disabled></textarea>
-    <button class="primary" id="send" disabled>送信</button>
-  </div>
-  <div id="meter"><span>Cookieログ</span><span class="bar"><i></i></span><span id="meterText">0 KB</span></div>
-</footer>
-
-<script type="module">
-const WEBLLM_URL = "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.87/+esm";
-
-const MODELS = [
-  { id: "Qwen3.5-0.8B-q4f16_1-MLC", name: "Qwen3.5 0.8B", desc: "軽量・速い。お試し向け", size: "約0.4GB", vram: 1.6 },
-  { id: "Qwen3.5-2B-q4f16_1-MLC", name: "Qwen3.5 2B", desc: "おすすめ。賢さと速さのバランス", size: "約1.1GB", vram: 2.3 },
-  { id: "gemma-2-2b-jpn-it-q4f16_1-MLC", name: "Gemma 2 2B 日本語", desc: "日本語向けチューニング版", size: "約1.4GB", vram: 1.9 },
-  { id: "Qwen3.5-4B-q4f16_1-MLC", name: "Qwen3.5 4B", desc: "高性能。GPUメモリに余裕がある人向け", size: "約2.2GB", vram: 3.9 },
-];
-const SYSTEM_PROMPT = "あなたは親切で簡潔な日本語アシスタントです。ユーザーの言語に合わせて答えてください。";
-const HISTORY_CHAR_BUDGET = 3500; // モデルに渡す過去ログの目安（4kトークンの文脈に収める）
-
-/* ---------------- Cookie ログ保存 ---------------- */
-const CK = "pllm";               // cookie name prefix
-const CHUNK = 3800;               // 1 cookie あたりの値の長さ
-const MAX_CHUNKS = 5;             // 合計 ~19KB（リクエストヘッダが大きくなりすぎないように）
-const COOKIE_PATH = location.pathname.replace(/[^/]*$/, "") || "/";
-const COOKIE_ATTR = `; path=${COOKIE_PATH}; max-age=34560000; SameSite=Strict${location.protocol === "https:" ? "; Secure" : ""}`;
-
-function readCookies() {
-  const out = {};
-  for (const part of document.cookie.split("; ")) {
-    if (!part) continue;
-    const i = part.indexOf("=");
-    out[part.slice(0, i)] = part.slice(i + 1);
-  }
-  return out;
-}
-const setCookie = (k, v) => { document.cookie = `${k}=${v}${COOKIE_ATTR}`; };
-const delCookie = (k) => { document.cookie = `${k}=; path=${COOKIE_PATH}; max-age=0`; };
-
-const b64u = {
-  enc(bytes) { let s = ""; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); },
-  dec(str) { const s = atob(str.replace(/-/g, "+").replace(/_/g, "/")); const b = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i); return b; },
-};
-const canZip = typeof CompressionStream !== "undefined";
-async function pipe(bytes, stream) { return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer()); }
-async function pack(obj) {
-  const raw = new TextEncoder().encode(JSON.stringify(obj));
-  return canZip ? "z" + b64u.enc(await pipe(raw, new CompressionStream("deflate-raw"))) : "r" + b64u.enc(raw);
-}
-async function unpack(str) {
-  const bytes = b64u.dec(str.slice(1));
-  const raw = str[0] === "z" ? await pipe(bytes, new DecompressionStream("deflate-raw")) : bytes;
-  return JSON.parse(new TextDecoder().decode(raw));
-}
-
-async function loadLog() {
-  try {
-    const c = readCookies();
-    const n = parseInt(c[CK + "_n"] || "0", 10);
-    if (!n) return null;
-    let s = "";
-    for (let i = 0; i < n; i++) { if (c[CK + "_" + i] == null) return null; s += c[CK + "_" + i]; }
-    return await unpack(s);
-  } catch (e) { console.warn("log restore failed", e); return null; }
-}
-
-let trimmedNotice = false;
-async function saveLog() {
-  const data = { v: 1, model: state.model, msgs: state.msgs.map(m => ({ r: m.role === "user" ? "u" : "a", c: m.content, t: m.t })) };
-  let s = await pack(data);
-  // 容量オーバーなら古い発言から削る
-  while (s.length > CHUNK * MAX_CHUNKS && data.msgs.length > 1) {
-    data.msgs.splice(0, Math.max(1, Math.ceil(data.msgs.length * 0.1)));
-    s = await pack(data);
-    trimmedNotice = true;
-  }
-  if (s.length > CHUNK * MAX_CHUNKS) { data.msgs = []; s = await pack(data); }
-  const old = parseInt(readCookies()[CK + "_n"] || "0", 10);
-  const n = Math.ceil(s.length / CHUNK);
-  for (let i = 0; i < n; i++) setCookie(CK + "_" + i, s.slice(i * CHUNK, (i + 1) * CHUNK));
-  for (let i = n; i < Math.max(old, MAX_CHUNKS + 2); i++) delCookie(CK + "_" + i);
-  setCookie(CK + "_n", n);
-  state.savedCount = data.msgs.length;
-  updateMeter(s.length);
-}
-function clearLog() {
-  const c = readCookies();
-  for (const k of Object.keys(c)) if (k.startsWith(CK + "_")) delCookie(k);
-  updateMeter(0);
-}
-
-/* ---------------- UI helpers ---------------- */
-const $ = (id) => document.getElementById(id);
-const state = { engine: null, webllm: null, model: null, loadedModel: null, msgs: [], busy: false, savedCount: 0 };
-
-function setStatus(text, cls = "") { $("statusText").textContent = text; $("status").className = cls; }
-function updateMeter(len) {
-  const max = CHUNK * MAX_CHUNKS;
-  $("meter").querySelector("i").style.width = Math.min(100, (len / max) * 100) + "%";
-  $("meterText").textContent = `${(len / 1024).toFixed(1)} / ${(max / 1024).toFixed(0)} KB` + (trimmedNotice ? "（古いログを一部削除）" : "");
-}
-function esc(s) { return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
-function render(text) {
-  // 最低限のMarkdown: コードブロック / インラインコード / 太字
-  const parts = text.split(/```/);
-  return parts.map((p, i) => {
-    if (i % 2) { const body = p.replace(/^[\w+-]*\n/, ""); return `<pre><code>${esc(body)}</code></pre>`; }
-    return esc(p).replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
-  }).join("");
-}
-const stripThink = (s) => s.replace(/<think>[\s\S]*?(<\/think>\s*|$)/g, "").replace(/^\s+/, "");
-const scrollDown = () => { const m = $("scroller"); m.scrollTop = m.scrollHeight; };
-
-function renderChat() {
-  const chat = $("chat");
-  chat.innerHTML = "";
-  if (!state.msgs.length) {
-    chat.innerHTML = `<div class="empty"><div class="big">🌱</div>${state.engine ? "なんでも聞いてみてください" : "モデルを読み込むと会話できます"}</div>`;
-    if (state.engine) {
-      const chips = document.createElement("div"); chips.className = "chips";
-      for (const q of ["自己紹介して", "今日の夕飯のアイデアを3つ", "俳句をひとつ詠んで", "JavaScriptで配列をシャッフルする方法"]) {
-        const b = document.createElement("button"); b.textContent = q; b.onclick = () => { $("input").value = q; send(); }; chips.append(b);
-      }
-      chat.querySelector(".empty").append(chips);
-    }
-    return;
-  }
-  if (state.restored) chat.insertAdjacentHTML("beforeend", `<div class="sysmsg">Cookieから ${state.restored} 件のログを復元しました</div>`);
-  for (const m of state.msgs) chat.append(bubble(m));
-  scrollDown();
-}
-function bubble(m) {
-  const d = document.createElement("div");
-  d.className = "msg " + (m.role === "user" ? "u" : "a");
-  d.innerHTML = render(m.content);
-  return d;
-}
-
-/* ---------------- Model setup ---------------- */
-async function buildModelList() {
-  const box = $("models"); box.innerHTML = "";
-  for (const m of MODELS) {
-    const label = document.createElement("label"); label.className = "model";
-    label.innerHTML = `<input type="radio" name="model" value="${m.id}"><b>${m.name}</b><span>${m.desc}</span><span>DL ${m.size} ・ GPUメモリ約${m.vram}GB</span><span class="tag" data-tag></span>`;
-    label.querySelector("input").checked = m.id === (state.model || MODELS[0].id);
-    box.append(label);
-  }
-  // キャッシュ済みかどうかを表示
-  try {
-    const w = await getWebLLM();
-    for (const label of box.children) {
-      const id = label.querySelector("input").value, tag = label.querySelector("[data-tag]");
-      if (await w.hasModelInCache(id)) { tag.textContent = "ダウンロード済み"; tag.classList.add("cached"); }
-      else tag.remove();
-      if (id === state.loadedModel) { tag.textContent = "使用中"; tag.classList.add("cached"); }
-    }
-  } catch { box.querySelectorAll("[data-tag]").forEach(t => { if (!t.textContent) t.remove(); }); }
-}
-async function getWebLLM() { return state.webllm ||= await import(WEBLLM_URL); }
-
-async function checkWebGPU() {
-  if (!("gpu" in navigator)) return "このブラウザはWebGPUに対応していません。\nChrome / Edge の最新版、または Safari 26 以降でお試しください。";
-  try { if (!(await navigator.gpu.requestAdapter())) return "WebGPUのアダプタが見つかりません（GPUが無効化されている可能性があります）。"; }
-  catch (e) { return "WebGPUの初期化に失敗しました: " + e.message; }
-  return null;
-}
-
-function showSetup(show) {
-  $("setup").hidden = !show;
-  $("btnCancelSetup").hidden = !state.engine;
-  if (show) { buildModelList(); $("chat").hidden = !state.msgs.length && !state.engine; }
-  else $("chat").hidden = false;
-}
-
-async function loadModel(id) {
-  $("err").textContent = "";
-  const gpuErr = await checkWebGPU();
-  if (gpuErr) { $("err").textContent = gpuErr; return; }
-  state.busy = true; syncControls();
-  $("btnLoad").disabled = true;
-  const prog = $("progress"); prog.style.display = "block";
-  const bar = prog.querySelector("i"), txt = prog.querySelector(".txt");
-  setStatus("読み込み中…", "busy");
-  try {
-    const w = await getWebLLM();
-    const onProgress = (r) => {
-      bar.style.width = Math.round((r.progress || 0) * 100) + "%";
-      const mb = /(\d+)MB fetched/.exec(r.text);
-      txt.textContent = mb ? `ダウンロード中… ${mb[1]}MB（${Math.round((r.progress || 0) * 100)}%）初回のみ時間がかかります` : /cache\[/.test(r.text) ? `キャッシュから読み込み中…（${Math.round((r.progress || 0) * 100)}%）` : r.text;
-    };
-    if (state.engine) { state.engine.setInitProgressCallback(onProgress); await state.engine.reload(id); }
-    else state.engine = await w.CreateMLCEngine(id, { initProgressCallback: onProgress });
-    state.model = state.loadedModel = id;
-    setCookie(CK + "m", encodeURIComponent(id));
-    const meta = MODELS.find(m => m.id === id);
-    setStatus((meta ? meta.name : id) + " 準備完了", "ready");
-    prog.style.display = "none";
-    showSetup(false);
-    renderChat();
-  } catch (e) {
-    console.error(e);
-    $("err").textContent = "読み込みに失敗しました: " + (e?.message || e) + "\nGPUメモリ不足の場合は、より小さいモデルを選んでください。";
-    setStatus(state.loadedModel ? "準備完了" : "未読み込み", state.loadedModel ? "ready" : "");
-  } finally {
-    state.busy = false; $("btnLoad").disabled = false; syncControls();
-  }
-}
-
-/* ---------------- Chat ---------------- */
-function buildContext() {
-  const out = []; let used = 0;
-  for (let i = state.msgs.length - 1; i >= 0; i--) {
-    const m = state.msgs[i];
-    used += m.content.length;
-    if (used > HISTORY_CHAR_BUDGET && out.length) break;
-    out.unshift({ role: m.role, content: m.content });
-  }
-  return [{ role: "system", content: SYSTEM_PROMPT }, ...out];
-}
-
-let stopRequested = false;
-async function send() {
-  const input = $("input");
-  const text = input.value.trim();
-  if (!text || !state.engine || state.busy) return;
-  input.value = ""; autosize();
-  if (!state.msgs.length) $("chat").innerHTML = "";
-  const um = { role: "user", content: text, t: Date.now() };
-  state.msgs.push(um); $("chat").append(bubble(um));
-  const am = { role: "assistant", content: "", t: Date.now() };
-  const el = bubble(am); el.classList.add("typing"); $("chat").append(el); scrollDown();
-  state.busy = true; stopRequested = false; syncControls(); setStatus("考え中…", "busy");
-  let raw = "";
-  try {
-    const req = { messages: buildContext(), stream: true, temperature: 0.7, max_tokens: 1024 };
-    if (/qwen3/i.test(state.loadedModel)) req.extra_body = { enable_thinking: false };
-    const chunks = await state.engine.chat.completions.create(req);
-    for await (const ch of chunks) {
-      raw += ch.choices[0]?.delta?.content || "";
-      am.content = stripThink(raw);
-      el.innerHTML = render(am.content); scrollDown();
-    }
-  } catch (e) {
-    console.error(e);
-    if (!am.content) am.content = "（エラー: " + (e?.message || e) + "）";
-  }
-  if (!am.content.trim()) am.content = stopRequested ? "（停止しました）" : "（応答がありませんでした）";
-  el.innerHTML = render(am.content); el.classList.remove("typing");
-  state.msgs.push(am);
-  state.busy = false; syncControls();
-  const meta = MODELS.find(m => m.id === state.loadedModel);
-  setStatus((meta ? meta.name : state.loadedModel) + " 準備完了", "ready");
-  await saveLog();
-  input.focus();
-}
-
-function syncControls() {
-  const ready = !!state.engine;
-  const generating = state.busy && ready && $("setup").hidden;
-  $("input").disabled = !ready;
-  $("send").disabled = !ready || (state.busy && !generating);
-  $("send").textContent = generating ? "停止" : "送信";
-  $("btnModel").disabled = state.busy;
-  $("btnNew").disabled = state.busy;
-}
-function autosize() { const t = $("input"); t.style.height = "auto"; t.style.height = Math.min(200, t.scrollHeight) + "px"; }
-
-$("input").addEventListener("input", autosize);
-$("input").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); send(); }
-});
-$("send").onclick = () => {
-  if (state.busy && state.engine) { stopRequested = true; state.engine.interruptGenerate(); }
-  else send();
-};
-$("btnLoad").onclick = () => loadModel(document.querySelector('input[name="model"]:checked').value);
-$("btnCancelSetup").onclick = () => showSetup(false);
-$("btnModel").onclick = () => showSetup($("setup").hidden);
-$("btnNew").onclick = async () => {
-  if (state.msgs.length && !confirm("今の会話ログを消去して新しい会話を始めますか？")) return;
-  state.msgs = []; state.restored = 0; trimmedNotice = false; clearLog();
-  if (state.engine) await state.engine.resetChat?.();
-  renderChat();
-};
-$("btnExport").onclick = () => {
-  const blob = new Blob([JSON.stringify({ model: state.model, exportedAt: new Date().toISOString(), messages: state.msgs }, null, 2)], { type: "application/json" });
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
-  a.download = `pocket-llm-log-${new Date().toISOString().slice(0, 10)}.json`; a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-};
-
-window.__pllm = { state, saveLog, loadLog }; // デバッグ用
-
-/* ---------------- Boot ---------------- */
-(async function boot() {
-  const saved = await loadLog();
-  if (saved?.msgs) state.msgs = saved.msgs.map(m => ({ role: m.r === "u" ? "user" : "assistant", content: m.c, t: m.t }));
-  const c = readCookies();
-  state.model = (c[CK + "m"] && decodeURIComponent(c[CK + "m"])) || saved?.model || null;
-  if (!MODELS.some(m => m.id === state.model)) state.model = null;
-  const n = parseInt(c[CK + "_n"] || "0", 10);
-  let len = 0; for (let i = 0; i < n; i++) len += (c[CK + "_" + i] || "").length; updateMeter(len);
-  state.restored = state.msgs.length;
-  renderChat();
-  showSetup(true);
-  // 前回使ったモデルがキャッシュ済みなら自動で読み込む
-  if (state.model && !(await checkWebGPU())) {
-    try { if (await (await getWebLLM()).hasModelInCache(state.model)) loadModel(state.model); } catch {}
-  }
-})();
-</script>
+</div>
+<div id="toast"></div>
+<script src="js/core.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/seq.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
 </body>
 </html>
