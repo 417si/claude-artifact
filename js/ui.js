@@ -527,7 +527,7 @@ function leadKeysPerRow(){ const N=leadSet().length; return (S.synth.lead.mode|0
 function leadPitchAt(idx){ const set=leadSet(), N=set.length; return leadRoot()+12*Math.floor(idx/N)+set[mod(idx,N)]; }
 function magnet(f){ if(f<.12) return 0; if(f>.88) return 1; const x=(f-.12)/.76; return x*x*(3-2*x); }
 function leadPitchCont(u){ const i=Math.floor(u), f=u-i, a=leadPitchAt(i), b=leadPitchAt(i+1); return a+(b-a)*magnet(f); }
-const CHOKE_DEAD=18;
+const CHOKE_DEAD=28, KEY_HYST=.62;
 
 function buildLead(){
   const el=makePage('lead');
@@ -560,10 +560,14 @@ function buildLead(){
   const calc=(T,e,g)=>{
     const x=e.clientX-g.r.left, y=e.clientY-g.r.top;
     let u=T.k0+(x-T.x0)/g.kw;
-    const lo=T.row*g.N-.45, hi=T.row*g.N+g.K-1+.45; u=clamp(u,lo,hi);
-    const slide=leadPitchCont(u);
-    const dy=Math.abs(y-T.y0), c=clamp((dy-CHOKE_DEAD)/(g.rh*.45),0,1);
-    const choke=(1-(1-c)*(1-c))*S.synth.lead.bend;
+    const lo=T.row*g.N, hi=T.row*g.N+g.K-1; u=clamp(u,lo-.49,hi+.49);
+    // horizontal: always a key of the scale; move to the neighbour only once clearly over it
+    if(T.key===undefined) T.key=T.k0;
+    if(Math.abs(u-T.key)>KEY_HYST) T.key=clamp(Math.round(u),lo,hi);
+    const slide=leadPitchAt(T.key);
+    // vertical: nothing at all inside the dead zone, then a smooth choke
+    const dy=Math.abs(y-T.y0), c=clamp((dy-CHOKE_DEAD)/(g.rh*.5),0,1);
+    const choke= c>0 ? c*c*(3-2*c)*S.synth.lead.bend : 0;
     T.u=u; T.choke=choke; T.cx=x; T.cy=y; T.slide=slide;
     T.x=clamp(x/g.r.width,0,1); T.y=clamp(1-y/g.r.height,0,1);
     return slide+choke;
@@ -574,7 +578,7 @@ function buildLead(){
     const g=mkGeom(), x=e.clientX-g.r.left, y=e.clientY-g.r.top;
     const row=clamp(LROWS-1-Math.floor(y/g.rh),0,LROWS-1);
     const j=clamp(Math.floor(x/g.kw),0,g.K-1);
-    const T={row, k0:row*g.N+j, x0:x, y0:y, uid:++uidc};
+    const T={row, k0:row*g.N+j, key:row*g.N+j, lastKey:row*g.N+j, x0:x, y0:y, uid:++uidc};
     const p=calc(T,e,g);
     T.p=p; T.v=makeVoice('lead',now(),p+S.synth.lead.oct*12,.6);
     UI.leadTouches.set(e.pointerId,T); UI.leadOnT=now(); UI.leadOffT=Infinity;
@@ -584,7 +588,8 @@ function buildLead(){
     const T=UI.leadTouches.get(e.pointerId); if(!T) return;
     const g=geom()||mkGeom(), p=calc(T,e,g);
     if(Math.abs(p-T.p)<.0005) return;
-    const tc = T.choke>0 ? .005 : .004+S.synth.lead.glide*.04;
+    const keyMove = T.lastKey!==T.key; T.lastKey=T.key;
+    const tc = keyMove ? .003+S.synth.lead.glide*.12 : .004;
     T.p=p; T.v.setPitch(p+S.synth.lead.oct*12, A.ctx.currentTime, tc);
     recLead('mv',T.uid,p,T.row,T.x,T.y);
   });
@@ -635,7 +640,7 @@ function buildLead(){
     c.setTransform(1,0,0,1,0,0); c.clearRect(0,0,fb.width,fb.height); c.drawImage(bg,0,0); c.setTransform(dpr,0,0,dpr,0,0);
     // sounding keys
     c.fillStyle='rgba(255,210,26,.16)';
-    for(const T of UI.leadTouches.values()){ const idx=Math.round(T.u), r=T.row, j=idx-r*N; if(j>=0&&j<K) c.fillRect(j*kw+1,hh-(r+1)*rh+1,kw-2,rh-2); }
+    for(const T of UI.leadTouches.values()){ const idx=T.key, r=T.row, j=idx-r*N; if(j>=0&&j<K) c.fillRect(j*kw+1,hh-(r+1)*rh+1,kw-2,rh-2); }
     // ghosts (recorded playback)
     for(const g of UI.ghosts.values()){
       const x=g.x*w, y=(1-g.y)*hh;
@@ -739,7 +744,7 @@ function buildMix(){
   Knob(kn,{label:'DRIVE',get:()=>S.mix.master.drive,set:v=>{S.mix.master.drive=v;applyMix();},def:.15});
   Knob(kn,{label:'DUCK',get:()=>S.mix.master.duck,set:v=>{S.mix.master.duck=v;},def:.3});
   Knob(kn,{label:'MASTER',get:()=>S.mix.master.vol,set:v=>{S.mix.master.vol=v;applyMix();},def:.85});
-  const gr=h('div','lbl','COMP GR 0.0DB'); box.appendChild(gr);
+  const gr=h('div','lbl',''); box.appendChild(gr);
   function refresh(){ strips.forEach(s=>s.upd()); UI.knobs.forEach(k=>k.draw()); }
   function frame(){
     for(const s of strips){
@@ -750,7 +755,7 @@ function buildMix(){
       const db=20*Math.log10(Math.max(b.peak,1e-5)), n=clamp((db+48)/48,0,1), seg=Math.floor(hh/4);
       for(let i=0;i<seg;i++){ const yy=hh-(i+1)*4; const lv=i/seg; c.fillStyle = lv<n ? (lv>.9?'#ff3b1f':lv>.75?'#ffd21a':'#ededed') : '#1a1a1a'; c.fillRect(0,yy,w,3); }
     }
-    if(A.master) gr.textContent='COMP GR '+A.master.comp.reduction.toFixed(1)+'DB · DLY '+Math.round(stepDur()*DLY_DIVS[S.mix.master.dlyDiv].s*1000)+'MS';
+    if(A.ctx) gr.textContent='SOFT CLIP · OUT LAT '+Math.round(((A.ctx.baseLatency||0)+(A.ctx.outputLatency||0))*1000)+'MS · DLY '+Math.round(stepDur()*DLY_DIVS[S.mix.master.dlyDiv].s*1000)+'MS';
   }
   return {el,refresh,frame};
 }

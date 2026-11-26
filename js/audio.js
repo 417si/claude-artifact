@@ -9,7 +9,7 @@ const A = {
 
 function audioInit(){
   const AC = window.AudioContext || window.webkitAudioContext;
-  const ctx = new AC({latencyHint:'interactive'});
+  let ctx; try{ ctx = new AC({latencyHint:0}); }catch(e){ ctx = new AC({latencyHint:'interactive'}); }
   A.ctx = ctx;
   try{ if(navigator.audioSession) navigator.audioSession.type='playback'; }catch(e){}
 
@@ -19,17 +19,17 @@ function audioInit(){
   A.noise = nb;
 
   // ---- master ----
+  // master: no DynamicsCompressor here (each adds ~6 ms look-ahead); zero-latency soft clip instead
   const mIn = ctx.createGain();
   const dry = ctx.createGain(), wet = ctx.createGain();
-  const sh = ctx.createWaveShaper(); sh.curve = tanhCurve(3.2); sh.oversample='2x';
-  const comp = ctx.createDynamicsCompressor();
-  comp.threshold.value=-16; comp.ratio.value=3.5; comp.knee.value=10; comp.attack.value=.006; comp.release.value=.18;
-  const lim = ctx.createDynamicsCompressor();
-  lim.threshold.value=-1.5; lim.ratio.value=20; lim.knee.value=0; lim.attack.value=.001; lim.release.value=.08;
+  const sh = ctx.createWaveShaper(); sh.curve = tanhCurve(3.2); sh.oversample='none';
+  const sum = ctx.createGain(); sum.gain.value=.72;
+  const clip = ctx.createWaveShaper(); clip.curve = softClipCurve(); clip.oversample='none';
   const mOut = ctx.createGain();
   const an = ctx.createAnalyser(); an.fftSize=2048; an.smoothingTimeConstant=.72;
   mIn.connect(dry); mIn.connect(sh); sh.connect(wet);
-  dry.connect(comp); wet.connect(comp); comp.connect(lim); lim.connect(mOut); mOut.connect(an); an.connect(ctx.destination);
+  dry.connect(sum); wet.connect(sum); sum.connect(clip); clip.connect(mOut); mOut.connect(an); an.connect(ctx.destination);
+  const comp=null;
   A.master = {in:mIn, dry, wet, out:mOut, an, comp};
 
   // ---- delay (ping-pong) ----
@@ -67,6 +67,11 @@ function audioInit(){
   renderKit();
 }
 
+function softClipCurve(){
+  const n=2048, c=new Float32Array(n);
+  for(let i=0;i<n;i++){ const x=(i/(n-1)*2-1)*1.5; const a=Math.abs(x); c[i]= a<.7 ? x : Math.sign(x)*(.7+.3*Math.tanh((a-.7)/.3)); }
+  return c;
+}
 function tanhCurve(k){
   const n=1024, c=new Float32Array(n), t=Math.tanh(k);
   for(let i=0;i<n;i++){ const x=i/(n-1)*2-1; c[i]=Math.tanh(k*x)/t; }
@@ -138,7 +143,7 @@ function buildBassSynth(){
   b.mix=ctx.createGain(); b.mix.gain.value=.45; b.subG=ctx.createGain();
   b.f1=ctx.createBiquadFilter(); b.f2=ctx.createBiquadFilter(); b.f1.type=b.f2.type='lowpass'; b.f2.Q.value=.6;
   b.f1.frequency.value=30; b.f2.frequency.value=30;
-  b.drv=ctx.createWaveShaper(); b.drv.oversample='2x'; b.vca=ctx.createGain(); b.vca.gain.value=0; b.post=ctx.createGain();
+  b.drv=ctx.createWaveShaper(); b.drv.oversample='none'; b.vca=ctx.createGain(); b.vca.gain.value=0; b.post=ctx.createGain();
   b.o1.connect(b.mix); b.o2.connect(b.mix); b.sub.connect(b.subG);
   b.mix.connect(b.f1); b.f1.connect(b.f2); b.f2.connect(b.drv); b.drv.connect(b.vca); b.subG.connect(b.vca);
   b.vca.connect(b.post); b.post.connect(A.bus.bass.in);
